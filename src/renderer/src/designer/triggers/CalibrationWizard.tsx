@@ -24,6 +24,7 @@ import { applyTrigger, triggerState } from './TriggerPanel'
 type Side = 'L2' | 'R2'
 const STRENGTH = 8
 const HOLDS_PER_WALL = 3
+const MIN_ZONES_PER_SIDE = 4
 const HOLDS_KEY = 'dshd.wallHolds' // kept between sessions so a long test can be resumed
 // The zone 1 wall sits only ~5/255 in, so pressed/released are a couple of steps of the
 // 0-255 reading (the trigger reads 0 at rest)
@@ -70,6 +71,9 @@ interface Run {
   count: number // holds recorded at this wall
   phase: 'ready' | 'recorded' // ready: waiting for a steady touch; recorded: waiting for release
   window: { t: number; a: number; side: Side }[]
+  /** live diagnostics: trigger being read and the wobble over the current window (0-255 steps) */
+  side: Side | null
+  wobble: number
 }
 
 export function CalibrationWizard({ onClose }: { onClose: () => void }) {
@@ -117,12 +121,15 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
       }
       if (a < PRESSED) {
         r.window = []
+        r.side = null
         return
       }
       r.window.push({ t, a, side })
       while (r.window.length && t - r.window[0].t > STEADY_MS) r.window.shift()
       const span = r.window.length ? t - r.window[0].t : 0
       const vals = r.window.map((w) => w.a)
+      r.side = side
+      r.wobble = (Math.max(...vals) - Math.min(...vals)) * 255
       const steady = span >= STEADY_MS * 0.9 && Math.max(...vals) - Math.min(...vals) <= STEADY_RANGE && r.window.every((w) => w.side === side)
       if (steady) {
         const value = median(vals)
@@ -137,7 +144,7 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
   const start = () => {
     const queue = shuffled()
     const zone = queue.shift()!
-    run.current = { queue, zone, count: 0, phase: 'ready', window: [] }
+    run.current = { queue, zone, count: 0, phase: 'ready', window: [], side: null, wobble: 0 }
     void setWall(zone)
     setRunning(true)
     setMsg('')
@@ -157,8 +164,17 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
 
   const save = () => {
     if (!fitAll) return
-    setCalibration({ zones: zonesFromFit(fitAll), fit: fitAll, holds, measuredAt: new Date().toISOString() })
-    setMsg('Saved. The trigger graphs and zone labels now use this formula.')
+    // a trigger gets its own line once it has holds at a few different zones
+    const own = (fit: LineFit | null, side: Side) =>
+      fit && new Set(fitHolds.filter((h) => h.side === side).map((h) => h.zone)).size >= MIN_ZONES_PER_SIDE ? { fit, zones: zonesFromFit(fit) } : undefined
+    const sides = { L2: own(fitL, 'L2'), R2: own(fitR, 'R2') }
+    setCalibration({ zones: zonesFromFit(fitAll), fit: fitAll, sides, holds, measuredAt: new Date().toISOString() })
+    const which = (['L2', 'R2'] as Side[]).filter((sd) => sides[sd])
+    setMsg(
+      which.length === 2
+        ? 'Saved. Each trigger now uses its own line.'
+        : 'Saved. ' + (which.length ? which[0] + ' uses its own line; the other uses both triggers together' : 'Both triggers use the combined line') + ' (a trigger needs holds at ' + MIN_ZONES_PER_SIDE + '+ zones for its own).',
+    )
   }
 
   const r = run.current
@@ -200,17 +216,22 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
           Clear holds
         </button>
         <span className="mono small">
-          reading {pct(live)} · {holds.length} holds
+          L2 {byte(dualSense.state.l2)} · R2 {byte(dualSense.state.r2)} (0–255) · {holds.length} holds ({holds.filter((h) => h.side === 'L2').length} L2)
         </span>
       </div>
       <div style={{ position: 'relative', height: 14, background: 'var(--line)', borderRadius: 4, margin: '8px 0' }}>
         <div style={{ width: `${live * 100}%`, height: '100%', background: r?.phase === 'recorded' ? '#7aa2ff' : '#3ad6a8', borderRadius: 4 }} />
       </div>
       {prompt && <div style={{ margin: '6px 0' }}>{prompt}</div>}
+      {r?.phase === 'ready' && r.side && (
+        <div className="mono small muted">
+          reading {r.side} · wobble {r.wobble.toFixed(0)} steps (a hold needs ≤ {Math.round(STEADY_RANGE * 255)} for {STEADY_MS / 1000} s)
+        </div>
+      )}
 
       {holds.length > 0 && !running && (
         <>
-          <Scatter holds={holds} fit={fitAll} />
+          <Scatter holds={holds} fits={{ L2: fitL, R2: fitR }} />
           <FitSummary label="Both" fit={fitAll} />
           <FitSummary label="L2" fit={fitL} />
           <FitSummary label="R2" fit={fitR} />
@@ -221,7 +242,7 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
       {msg && <div className="small" style={{ margin: '6px 0' }}>{msg}</div>}
       <div className="row" style={{ marginTop: 8 }}>
         <button className="primary" disabled={!fitAll || running} onClick={save}>
-          Use this formula
+          Use these formulas
         </button>
         <button disabled={!saved || running} onClick={() => setCalibration(null)}>
           Reset to uncalibrated
@@ -280,8 +301,10 @@ function ZoneTable({ holds }: { holds: WallHold[] }) {
   )
 }
 
-/** Every hold (zone vs reading), the fitted line and the uncalibrated z×10% guess. */
-function Scatter({ holds, fit }: { holds: WallHold[]; fit: LineFit | null }) {
+const SIDE_COLOR: Record<Side, string> = { L2: '#ffb347', R2: '#3ad6a8' }
+
+/** Every hold (zone vs reading), each trigger's fitted line and the uncalibrated z×10% guess. */
+function Scatter({ holds, fits }: { holds: WallHold[]; fits: Record<Side, LineFit | null> }) {
   const W = 420
   const H = 220
   const p = 28
@@ -299,13 +322,15 @@ function Scatter({ holds, fit }: { holds: WallHold[]; fit: LineFit | null }) {
         <text key={z} x={x(z) - 3} y={H - 10} fontSize={9} fill="#8b91a1">{z}</text>
       ))}
       <line x1={x(0)} y1={y(0)} x2={x(10)} y2={y(1)} stroke="#555b6b" strokeDasharray="4 3" />
-      {fit && <line x1={x(0)} y1={y(fit.intercept)} x2={x(10)} y2={y(fit.intercept + fit.slope * 10)} stroke="#7aa2ff" />}
+      {(['L2', 'R2'] as Side[]).map((sd) => {
+        const f = fits[sd]
+        return f && <line key={sd} x1={x(0)} y1={y(f.intercept)} x2={x(10)} y2={y(f.intercept + f.slope * 10)} stroke={SIDE_COLOR[sd]} strokeOpacity={0.7} />
+      })}
       {holds.map((h, i) => (
-        <circle key={i} cx={x(h.zone) + (h.side === 'L2' ? -3 : 3)} cy={y(h.value)} r={2.5} fill={h.side === 'L2' ? '#ffb347' : '#3ad6a8'} />
+        <circle key={i} cx={x(h.zone) + (h.side === 'L2' ? -3 : 3)} cy={y(h.value)} r={2.5} fill={SIDE_COLOR[h.side]} />
       ))}
-      <text x={W - p - 90} y={14} fontSize={9} fill="#ffb347">● L2</text>
-      <text x={W - p - 60} y={14} fontSize={9} fill="#3ad6a8">● R2</text>
-      <text x={W - p - 30} y={14} fontSize={9} fill="#7aa2ff">— fit</text>
+      <text x={W - p - 60} y={14} fontSize={9} fill={SIDE_COLOR.L2}>● L2</text>
+      <text x={W - p - 30} y={14} fontSize={9} fill={SIDE_COLOR.R2}>● R2</text>
     </svg>
   )
 }

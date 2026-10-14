@@ -9,8 +9,10 @@
 import { loadLocal, saveLocal } from '../store'
 
 export interface TriggerCalibration {
-  /** Analog travel (0..1) where zone z (0-9) begins, non-decreasing. */
+  /** Analog travel (0..1) where zone z (0-9) begins, non-decreasing; both triggers together. */
   zones: number[]
+  /** Each trigger's own line, when it has enough holds (the triggers differ near full pull) */
+  sides?: Partial<Record<'L2' | 'R2', { fit: LineFit; zones: number[] }>>
   /** The fitted line the table came from, and the raw holds */
   fit: LineFit
   holds: WallHold[]
@@ -93,7 +95,7 @@ export function onCalibration(fn: () => void) {
   return () => listeners.delete(fn)
 }
 
-/** The active zone table (calibrated, or the z/10 default). */
-export function activeZones(): number[] {
-  return current?.zones ?? DEFAULT_ZONES
+/** A trigger's zone table: its own line, else both triggers' line, else the z/10 default. */
+export function zonesFor(cal: TriggerCalibration | null, side: 'L2' | 'R2'): number[] {
+  return cal?.sides?.[side]?.zones ?? cal?.zones ?? DEFAULT_ZONES
 }

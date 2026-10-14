@@ -15,7 +15,7 @@ import {
 import { BUILTIN_PRESETS, makePreset, parsePresets, serializePresets, type TriggerPreset } from '../../export/presets'
 import { loadLocal, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
-import { DEFAULT_ZONES, zoneToTravel } from '../../device/triggerCalibration'
+import { zonesFor, zoneToTravel } from '../../device/triggerCalibration'
 import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
 
 type Side = 'L2' | 'R2'
@@ -44,7 +44,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const [presets, setPresets] = useState<TriggerPreset[]>(() => loadLocal('dshd.userPresets', [] as TriggerPreset[]))
   const [msg, setMsg] = useState<string | null>(null)
   const [calibrating, setCalibrating] = useState(() => location.hash === '#calibrate')
-  const zones = useTriggerCalibration()?.zones ?? DEFAULT_ZONES
+  const calibration = useTriggerCalibration()
 
   const setEffect = (side: Side, e: TriggerEffect) => {
     triggerState[side] = e
@@ -130,7 +130,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
             key={side}
             side={side}
             effect={effects[side]}
-            zones={zones}
+            zones={zonesFor(calibration, side)}
             onChange={(e) => setEffect(side, e)}
             onSavePreset={(name) => savePresets([...presets, makePreset(name, side, effects[side])])}
           />
