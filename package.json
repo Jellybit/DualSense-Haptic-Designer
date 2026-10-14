@@ -1,0 +1,32 @@
+{
+  "name": "dualsense-haptic-designer",
+  "version": "0.1.0",
+  "description": "Design DualSense haptics, adaptive-trigger effects and 'things inside the controller' scenes.",
+  "main": "./out/main/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "build": "electron-vite build",
+    "start": "node scripts/run.mjs preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
+    "@types/w3c-web-hid": "^1.0.6",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.170.0"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist/
+*.log
+
+# previous controller model (no longer used or credited)
+/ps5_controller.glb
