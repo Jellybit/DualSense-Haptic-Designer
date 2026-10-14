@@ -171,7 +171,7 @@ function SideInfo() {
   return (
     <div className="side-info">
       <div className="row">
-        <button onClick={() => tracker.recenter()} disabled={!info} title="Hold the controller pointing at the screen, then click">
+        <button onClick={() => tracker.recenter()} disabled={!info} title="Hold the controller pointing at the screen, then click (or press Options, Create, L3 or R3 on the controller)">
           Recenter
         </button>
         <span className="muted small">

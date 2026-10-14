@@ -1,7 +1,7 @@
 // Turns raw controller IMU samples into a stable orientation + gravity vector.
 
 import type { InputState } from '../device/inputReport'
-import { Madgwick, quatConj, quatMul, rotateWorldToSensor, yawOnly, type Quat } from './madgwick'
+import { Madgwick, quatConj, quatMul, rotateWorldToSensor, type Quat } from './madgwick'
 
 export interface AxisMap {
   /** for each target axis (x right, y up, z toward player): which raw sensor axis and sign */
@@ -32,8 +32,10 @@ const DEG = Math.PI / 180
 export class OrientationTracker {
   filter = new Madgwick(0.06)
   axisMap: AxisMap = structuredClone(DEFAULT_AXIS_MAP)
-  /** reference orientation captured on recenter (yaw only) */
+  /** reference orientation captured on recenter (full: heading and tilt) */
   private ref: Quat = [1, 0, 0, 0]
+  /** bumped on every recenter, so the 3D view can turn the model to face its camera */
+  recenterCount = 0
   private lastTs: number | null = null
   private lastWall = 0
   /** gyro bias estimated while still (rad/s) */
@@ -48,9 +50,14 @@ export class OrientationTracker {
     this.lastTs = null
   }
 
-  /** Make the current heading the "facing the screen" heading. */
+  /**
+   * Make the way the controller is held right now the "facing the camera" pose: the model
+   * snaps to face the camera squarely and later turns and tilts are shown relative to this.
+   * (Gravity for the scenes is unaffected; see gravityInController.)
+   */
   recenter() {
-    this.ref = yawOnly(this.filter.q)
+    this.ref = [...this.filter.q] as Quat
+    this.recenterCount++
   }
 
   private remap(v: [number, number, number], m: [AxisSel, AxisSel, AxisSel]): [number, number, number] {
@@ -91,7 +98,7 @@ export class OrientationTracker {
     this.filter.update(g, a, dt)
   }
 
-  /** Orientation relative to the recentered heading. */
+  /** Orientation relative to the recentered pose. */
   get quaternion(): Quat {
     return quatMul(quatConj(this.ref), this.filter.q)
   }

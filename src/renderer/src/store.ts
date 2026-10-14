@@ -14,7 +14,6 @@ export const virtualTilt = { x: 0, y: 0 }
 /** Lightbar colour currently shown (mirrors what we sent to the controller). */
 export const lightbar = { rgb: [32, 64, 255] as [number, number, number] }
 
-dualSense.onInput((s) => tracker.update(s))
 
 export function liveInput(): InputState {
   return dualSense.state
@@ -64,3 +63,13 @@ export function saveLocal(key: string, v: unknown) {
     /* ignore */
   }
 }
+
+// Options, Create, L3 or R3 on the controller recenters the 3D view (not PS: it's often taken by Steam)
+const RECENTER_BUTTONS = ['options', 'create', 'l3', 'r3'] as const
+const recenterPresses = new PressTracker()
+dualSense.onInput((s) => {
+  tracker.update(s)
+  // check every button so each one's edge state stays current
+  const pressed = RECENTER_BUTTONS.map((b) => recenterPresses.pressed(b, s.buttons[b])).some(Boolean)
+  if (pressed) tracker.recenter()
+})

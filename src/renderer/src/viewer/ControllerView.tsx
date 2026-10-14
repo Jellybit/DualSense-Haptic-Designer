@@ -174,6 +174,13 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
     scene.add(fill)
 
     const holder = new THREE.Group() // controller frame; receives IMU orientation
+    // After a recenter the controller faces the camera squarely: its face (+y) toward the
+    // camera, its triggers (-z) up on screen. Captured from the camera at recenter time, so
+    // orbiting the view afterwards still works.
+    const faceCamera = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2)
+    const align = new THREE.Quaternion()
+    let aligned = false
+    let seenRecenter = tracker.recenterCount
     const offset = new THREE.Group() // user model-rotation fix-up
     holder.add(offset)
     offset.add(model.root)
@@ -296,9 +303,15 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
       }
 
       // Orientation
+      if (tracker.recenterCount !== seenRecenter) {
+        seenRecenter = tracker.recenterCount
+        align.copy(camera.quaternion).multiply(faceCamera)
+        aligned = true
+      }
       if (connected && s.full) {
         const [w, x, y, z] = tracker.quaternion
         holder.quaternion.set(x, y, z, w)
+        if (aligned) holder.quaternion.premultiply(align)
       } else {
         holder.quaternion.slerp(new THREE.Quaternion(), 0.1)
       }

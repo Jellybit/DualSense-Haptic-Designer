@@ -111,7 +111,7 @@ function ImuCard() {
       }
     >
       <p className="muted small" style={{ marginTop: 0 }}>
-        Orientation is fused from gyro + accelerometer (Madgwick). Yaw slowly drifts — press <b>Recenter</b> while pointing the controller at the screen. If the
+        Orientation is fused from gyro + accelerometer (Madgwick). Yaw slowly drifts — press <b>Recenter</b> (or Options, Create, L3 or R3 on the controller) while pointing the controller at the screen. If the
         model tilts the wrong way, flip the axis mapping below.
       </p>
       <div className="row">
