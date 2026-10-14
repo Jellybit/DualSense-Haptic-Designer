@@ -6,6 +6,7 @@
 //  4. design the L2/R2 trigger feedback
 //  5. export a 4-channel WAV (motors on ch 3/4, ch 1/2 silent) + the trigger JSON
 
+import { platform } from '../../platform'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
 import { hapticEngine } from '../../haptics/engine'
@@ -129,12 +130,12 @@ export function WorkbenchPanel() {
 
   useEffect(() => {
     const last = loadLocal<string | null>(LAST_FILE_KEY, null)
-    if (last) void window.api.readFile(last).then((f) => f && load(f.name, f.data, f.path))
+    if (last) void platform.readFile(last).then((f) => f && load(f.name, f.data, f.path))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const openFile = async () => {
-    const f = await window.api.openFile(AUDIO_FILTER)
+    const f = await platform.openFile(AUDIO_FILTER)
     if (f) await load(f.name, f.data, f.path)
   }
   const onDrop = async (e: React.DragEvent) => {
@@ -299,7 +300,7 @@ export function WorkbenchPanel() {
     const quad = layout === 'quad'
     const data = encodeWavChannels(quad ? toQuad(motors) : motors, SAMPLE_RATE)
     const name = downloadName(`${baseName}-${quad ? 'dualsense-4ch' : 'haptics-stereo'}`, 'wav')
-    const path = await window.api.saveFile(name, [{ name: 'WAV', extensions: ['wav'] }], data)
+    const path = await platform.saveFile(name, [{ name: 'WAV', extensions: ['wav'] }], data)
     if (!path) return
     const layoutText = quad ? '4-ch, 48 kHz, 16-bit: motors on ch 3/4, ch 1/2 silent' : '2-ch, 48 kHz, 16-bit: left motor, right motor'
     setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower some EQ gain to avoid clipping` : ''}`)

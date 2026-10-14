@@ -1,6 +1,7 @@
 // Haptic clip timeline: compose L/R actuator waveforms from primitives, imported WAVs,
 // and trigger-effect keyframes. Export as WAV (+ trigger JSON timeline).
 
+import { platform } from '../../platform'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { hapticEngine } from '../../haptics/engine'
 import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
@@ -120,7 +121,7 @@ export function ClipsPanel() {
   }
 
   const importWav = async () => {
-    const f = await window.api.openFile([{ name: 'WAV audio', extensions: ['wav'] }])
+    const f = await platform.openFile([{ name: 'WAV audio', extensions: ['wav'] }])
     if (!f) return
     try {
       const a = decodeWav(f.data)
@@ -150,7 +151,7 @@ export function ClipsPanel() {
 
   const exportWav = async (layout: WavLayout) => {
     const bytes = encodeWav(rendered.L, rendered.R, SAMPLE_RATE, layout)
-    const path = await window.api.saveFile(downloadName(`${project.name}${layout === 'quad' ? '-4ch' : ''}`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], bytes)
+    const path = await platform.saveFile(downloadName(`${project.name}${layout === 'quad' ? '-4ch' : ''}`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], bytes)
     if (!path) return
     let extra = ''
     if (project.triggerKeys.length) {
@@ -163,18 +164,18 @@ export function ClipsPanel() {
           .map((k) => ({ time: Math.round(k.time * 1000) / 1000, trigger: k.side === 'L' ? 'L2' : 'R2', effect: k.effect, raw: encodeTrigger(k.effect) })),
       }
       const tpath = path.replace(/\.wav$/i, '') + '.triggers.json'
-      const saved = await window.api.saveFile(tpath.split(/[\\/]/).pop()!, [{ name: 'JSON', extensions: ['json'] }], JSON.stringify(timeline, null, 2))
+      const saved = await platform.saveFile(tpath.split(/[\\/]/).pop()!, [{ name: 'JSON', extensions: ['json'] }], JSON.stringify(timeline, null, 2))
       if (saved) extra = ` + ${saved}`
     }
     setMsg(`Exported ${path}${extra}`)
   }
 
   const saveProject = async () => {
-    const path = await window.api.saveFile(downloadName(project.name, 'dshd.json'), [{ name: 'Haptic project', extensions: ['json'] }], JSON.stringify(project))
+    const path = await platform.saveFile(downloadName(project.name, 'dshd.json'), [{ name: 'Haptic project', extensions: ['json'] }], JSON.stringify(project))
     if (path) setMsg(`Saved ${path}`)
   }
   const openProject = async () => {
-    const f = await window.api.openFile([{ name: 'Haptic project', extensions: ['json'] }])
+    const f = await platform.openFile([{ name: 'Haptic project', extensions: ['json'] }])
     if (!f) return
     try {
       const p = JSON.parse(new TextDecoder().decode(f.data)) as HapticProject

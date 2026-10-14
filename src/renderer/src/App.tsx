@@ -10,6 +10,7 @@ import { ClipsPanel } from './designer/clips/ClipsPanel'
 import { ScenePanel } from './designer/scenes/ScenePanel'
 import { WorkbenchPanel } from './designer/workbench/WorkbenchPanel'
 import { Meter } from './ui/controls'
+import { isElectron, loadBundledModel, platform } from './platform'
 
 type Tab = 'workbench' | 'controller' | 'experiments'
 type Experiment = 'scenes' | 'clips'
@@ -48,14 +49,8 @@ export function App() {
     void dualSense.autoConnect().catch(() => {})
     void (async () => {
       const last = loadLocal<string | null>(MODEL_PATH_KEY, null)
-      const candidates = [last, `${await window.api.assetsDir()}/models/dualsense.glb`].filter(Boolean) as string[]
-      for (const p of candidates) {
-        const f = await window.api.readFile(p)
-        if (f) {
-          await applyModel(f.name, f.data, p)
-          return
-        }
-      }
+      const f = (last ? await platform.readFile(last) : null) ?? (await loadBundledModel())
+      if (f) await applyModel(f.name, f.data, f.path || undefined)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -79,7 +74,7 @@ export function App() {
   }
 
   const loadModel = async () => {
-    const f = await window.api.openFile([{ name: '3D model', extensions: ['glb', 'gltf', 'dae'] }])
+    const f = await platform.openFile([{ name: '3D model', extensions: ['glb', 'gltf', 'dae'] }])
     if (f) await applyModel(f.name, f.data, f.path)
   }
 
@@ -250,6 +245,19 @@ function AudioControls() {
     await hapticEngine.start(id)
   }
 
+  // Browser only: labels stay hidden (and the DualSense unrecognised) until a media permission
+  const needsUnlock = !isElectron && !devices.some((d) => d.isDualSense)
+  const findControllerAudio = async () => {
+    try {
+      const picked = await HapticEngine.unlockOutputLabels()
+      const list = await refresh()
+      const id = picked ?? list.find((d) => d.isDualSense)?.deviceId
+      if (id) await choose(id)
+    } catch (e) {
+      console.warn('Audio permission was not granted', e)
+    }
+  }
+
   const routeLabel =
     hapticEngine.routing === 'dualsense'
       ? `haptics → ch 3/4 (${hapticEngine.channelCount}ch)`
@@ -267,6 +275,11 @@ function AudioControls() {
           </option>
         ))}
       </select>
+      {needsUnlock && (
+        <button className="small" title="Let the browser show audio device names so the controller can be found" onClick={() => void findControllerAudio()}>
+          Find controller audio
+        </button>
+      )}
       <span className="muted small" title={hapticEngine.error ?? ''}>
         {hapticEngine.error ? `audio error: ${hapticEngine.error}` : routeLabel}
       </span>

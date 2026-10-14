@@ -1,6 +1,7 @@
 // Adaptive trigger designer: per-trigger effect editor with live preview graph,
 // live send to the controller, and a JSON preset library.
 
+import { platform } from '../../platform'
 import { useEffect, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
 import {
@@ -30,7 +31,7 @@ export function applyTrigger(side: Side, e: TriggerEffect) {
 /** Save the current L2/R2 setup as a trigger-preset JSON file. Returns the path or null. */
 export async function exportTriggerJson(baseName: string): Promise<string | null> {
   const presets = [makePreset(`${baseName} L2`, 'L2', triggerState.L2), makePreset(`${baseName} R2`, 'R2', triggerState.R2)]
-  return window.api.saveFile(downloadName(`${baseName}.triggers`, 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(presets))
+  return platform.saveFile(downloadName(`${baseName}.triggers`, 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(presets))
 }
 
 /** `embedded`: shown inside another panel that provides its own export button. */
@@ -61,12 +62,12 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
 
   const exportPresets = async () => {
     const all = presets.length ? presets : [makePreset('L2', 'L2', effects.L2), makePreset('R2', 'R2', effects.R2)]
-    const path = await window.api.saveFile(downloadName('trigger-presets', 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(all))
+    const path = await platform.saveFile(downloadName('trigger-presets', 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(all))
     if (path) setMsg(`Exported ${all.length} preset(s) to ${path}`)
   }
 
   const importPresets = async () => {
-    const f = await window.api.openFile([{ name: 'JSON', extensions: ['json'] }])
+    const f = await platform.openFile([{ name: 'JSON', extensions: ['json'] }])
     if (!f) return
     try {
       const list = parsePresets(new TextDecoder().decode(f.data))

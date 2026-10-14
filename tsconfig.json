@@ -15,5 +15,5 @@
     "noEmit": true,
     "types": ["w3c-web-hid", "vite/client", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "electron.vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "electron.vite.config.ts", "vite.web.config.ts"]
 }

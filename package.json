@@ -9,7 +9,10 @@
     "build": "electron-vite build",
     "start": "node scripts/run.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "web": "vite --config vite.web.config.ts",
+    "web:build": "vite build --config vite.web.config.ts",
+    "web:preview": "vite preview --config vite.web.config.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

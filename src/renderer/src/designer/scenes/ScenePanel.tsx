@@ -1,6 +1,7 @@
 // Scene designer: live "things inside the controller" simulation driven by real tilt,
 // touchpad and buttons, with record-to-WAV.
 
+import { platform } from '../../platform'
 import { useEffect, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
 import { hapticEngine, Recorder } from '../../haptics/engine'
@@ -143,16 +144,16 @@ export function ScenePanel() {
       setMsg('Nothing recorded — is the audio engine running?')
       return
     }
-    const path = await window.api.saveFile(downloadName(`${cfg.name}-recording`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], encodeWav(L, R, SAMPLE_RATE, 'stereo'))
+    const path = await platform.saveFile(downloadName(`${cfg.name}-recording`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], encodeWav(L, R, SAMPLE_RATE, 'stereo'))
     if (path) setMsg(`Saved ${(L.length / SAMPLE_RATE).toFixed(1)} s to ${path}`)
   }
 
   const exportScene = async () => {
-    const path = await window.api.saveFile(downloadName(cfg.name, 'scene.json'), [{ name: 'Scene', extensions: ['json'] }], JSON.stringify(cfg, null, 2))
+    const path = await platform.saveFile(downloadName(cfg.name, 'scene.json'), [{ name: 'Scene', extensions: ['json'] }], JSON.stringify(cfg, null, 2))
     if (path) setMsg(`Saved ${path}`)
   }
   const importScene = async () => {
-    const f = await window.api.openFile([{ name: 'Scene', extensions: ['json'] }])
+    const f = await platform.openFile([{ name: 'Scene', extensions: ['json'] }])
     if (!f) return
     try {
       const c = JSON.parse(new TextDecoder().decode(f.data)) as SceneConfig

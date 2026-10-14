@@ -63,6 +63,25 @@ export class HapticEngine {
       }))
   }
 
+  /**
+   * Browsers hide output device labels until the page has a media permission, so the
+   * DualSense can't be recognised by name. Ask for one (needs a user gesture). Returns the
+   * device id picked by selectAudioOutput, when that API is used.
+   */
+  static async unlockOutputLabels(): Promise<string | null> {
+    const md = navigator.mediaDevices as MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> }
+    if (md.selectAudioOutput) {
+      try {
+        return (await md.selectAudioOutput()).deviceId
+      } catch {
+        // dismissed, or not allowed here; fall through to the mic prompt
+      }
+    }
+    const stream = await md.getUserMedia({ audio: true })
+    stream.getTracks().forEach((t) => t.stop())
+    return null
+  }
+
   /** Start (or restart) on a given output device. '' = system default. */
   async start(sinkId: string): Promise<void> {
     this.error = null

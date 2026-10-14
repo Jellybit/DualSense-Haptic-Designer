@@ -22,6 +22,29 @@ channels) automatically.
 > `scripts/run.mjs` strips `ELECTRON_RUN_AS_NODE` before launching. Some host processes (e.g.
 > tools embedded in VS Code) set it, which would make Electron start as plain Node.
 
+## Run in a browser
+
+The same app also runs in a Chrome or Edge tab:
+
+```
+npm run web          # dev server at http://localhost:5174
+npm run web:build    # static build into out/web/
+npm run web:preview  # serve out/web/ at http://localhost:5174
+```
+
+Limits compared with the desktop app:
+
+- **Chrome or Edge only.** Firefox and Safari have no WebHID, so the controller can't connect.
+- It must be served from `localhost` or over https. WebHID and audio output selection are
+  blocked on plain http and `file://`.
+- **Connect DualSense** opens the browser's own device chooser. Pick the controller there.
+- The browser hides audio device names until you grant a permission, so the controller's
+  audio output can't be found automatically. Click **Find controller audio** in the top bar
+  and allow it (Chrome may ask for microphone access; nothing is recorded).
+- Saving uses a save dialog where the browser supports one, or else a normal download. The
+  app can't reopen the last sound or model on the next visit.
+- Bluetooth haptics streaming (report `0x32`) is untested in the browser.
+
 ## How it works
 
 | Feature | Mechanism |
