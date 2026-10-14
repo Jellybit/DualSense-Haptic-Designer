@@ -146,14 +146,14 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
     renderer.outputColorSpace = THREE.SRGBColorSpace
     // Neutral keeps a white controller white instead of clipping it like ACES does
     renderer.toneMapping = THREE.NeutralToneMapping
-    renderer.toneMappingExposure = 0.9
+    renderer.toneMappingExposure = 0.75
     mount.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
     const pmrem = new THREE.PMREMGenerator(renderer)
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     // keep the reflections subtle; most of the shaping comes from the key light below
-    scene.environmentIntensity = 0.45
+    scene.environmentIntensity = 0.35
     const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 500)
     // player's-eye view: behind and above the controller, looking at the face
     camera.position.set(0, 21, 18)
@@ -166,7 +166,7 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
     scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 0.3))
     // low, raking key light: embossed button symbols on a white shell only read when light
     // grazes them; a soft fill from the other side keeps the shadows from going black
-    const key = new THREE.DirectionalLight(0xffffff, 1.5)
+    const key = new THREE.DirectionalLight(0xffffff, 1.3)
     key.position.set(-14, 9, 5)
     scene.add(key)
     const fill = new THREE.DirectionalLight(0xffffff, 0.4)
@@ -179,10 +179,11 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
     offset.add(model.root)
     scene.add(holder)
 
+    // Finger positions on the touchpad (up to two touches). Depth-tested like any other
+    // object, so they're hidden when the touchpad faces away from the camera.
     const touchMarkers = [0, 1].map(() => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), new THREE.MeshBasicMaterial({ color: 0x66ccff, depthTest: false }))
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshBasicMaterial({ color: 0x66ccff }))
       m.visible = false
-      m.renderOrder = 10
       holder.add(m)
       return m
     })

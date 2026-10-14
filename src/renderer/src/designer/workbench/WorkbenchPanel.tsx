@@ -285,16 +285,24 @@ export function WorkbenchPanel() {
   // --- export ---------------------------------------------------------------------
   const baseName = audio ? audio.name.replace(/\.[^.]+$/, '') : 'haptics'
 
-  const exportWav = async () => {
+  /**
+   * 'quad':   the controller's native USB-audio layout (ch 1/2 silent, motors on ch 3/4) —
+   *           plays as-is on the controller's sound device.
+   * 'stereo': motors only (ch 1 = left motor, ch 2 = right motor), for engines/middleware
+   *           that route haptics to the motors themselves.
+   */
+  const exportWav = async (layout: 'quad' | 'stereo') => {
     if (!audio) return
     const motors = await renderMotors(audio.channels, SAMPLE_RATE, eqs)
     let peak = 0
     for (const c of motors) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]))
-    const path = await window.api.saveFile(downloadName(`${baseName}-dualsense`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], encodeWavChannels(toQuad(motors), SAMPLE_RATE))
-    if (path)
-      setMsg(
-        `Saved ${path} (4-ch, 48 kHz, 16-bit: motors on ch 3/4, ch 1/2 silent)${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower some EQ gain to avoid clipping` : ''}`,
-      )
+    const quad = layout === 'quad'
+    const data = encodeWavChannels(quad ? toQuad(motors) : motors, SAMPLE_RATE)
+    const name = downloadName(`${baseName}-${quad ? 'dualsense-4ch' : 'haptics-stereo'}`, 'wav')
+    const path = await window.api.saveFile(name, [{ name: 'WAV', extensions: ['wav'] }], data)
+    if (!path) return
+    const layoutText = quad ? '4-ch, 48 kHz, 16-bit: motors on ch 3/4, ch 1/2 silent' : '2-ch, 48 kHz, 16-bit: left motor, right motor'
+    setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower some EQ gain to avoid clipping` : ''}`)
   }
 
   const exportJson = async () => {
@@ -323,8 +331,11 @@ export function WorkbenchPanel() {
         title="Sound → grip motors"
         right={
           <>
-            <button className="primary" onClick={() => void exportWav()} disabled={!audio}>
+            <button className="primary" onClick={() => void exportWav('quad')} disabled={!audio} title="Controller's native layout: ch 1/2 silent, motors on ch 3/4. Plays as-is on the controller's sound device.">
               Export 4-ch WAV…
+            </button>
+            <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. For engines/middleware that route haptics themselves.">
+              Export stereo WAV…
             </button>
             <button className="primary" onClick={() => void exportJson()}>
               Export trigger JSON…

@@ -44,7 +44,8 @@ channels) automatically.
   3. Press any face button on the controller (✕ ○ □ △) to feel it. Choose *play from start*
      or *play while held*. EQ edits apply live.
   4. Design L2/R2 trigger feedback below.
-  5. **Export 4-ch WAV** (rendered through the exact same EQs) and **Export trigger JSON**.
+  5. **Export 4-ch WAV** or **Export stereo WAV** (both rendered through the exact same EQs),
+     and **Export trigger JSON**.
 - **Controller & Model**: live input readout, IMU axis setup, lightbar, test signals, model
   loading and rig mapping.
 - **Experiments**: interactive toys that aren't part of the export workflow:
@@ -58,8 +59,11 @@ channels) automatically.
   silent. On the controller's USB audio device, ch 1/2 are the headset jack / speaker (heard,
   not felt) and ch 3/4 are the two voice-coil motors, one per grip. So this file plays on PC
   as-is.
-- **Haptic WAV, stereo**: ch1 = left actuator, ch2 = right actuator, 48 kHz 16-bit.
-- **Haptic WAV, 4-ch**: ch1/2 silent (speaker/headset), ch3/4 = actuators. Play it straight to
+- **Haptics stereo WAV** (main tab): 48 kHz 16-bit, ch 1 = left motor, ch 2 = right motor.
+  For engines/middleware that route haptics to the motors themselves. Played as plain audio
+  to the controller, a stereo file would go to the headset/speaker instead.
+- **Clip composer WAV, stereo** (Experiments): ch1 = left actuator, ch2 = right actuator, 48 kHz 16-bit.
+- **Clip composer WAV, 4-ch** (Experiments): ch1/2 silent (speaker/headset), ch3/4 = actuators. Play it straight to
   the controller's audio endpoint on PC.
 - **Trigger presets** (`*.json`): `{ format: "dualsense-trigger-presets", presets: [{ name,
   trigger, effect, raw }] }`. `raw` is the 11 bytes to copy into the trigger block of the
