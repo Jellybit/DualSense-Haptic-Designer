@@ -26,6 +26,7 @@ const RIG_KEY = 'dshd.rig'
 
 export function App() {
   const [tab, setTab] = useState<Tab>(() => {
+    if (location.hash === '#calibrate') return 'workbench'
     const t = loadLocal<string>('dshd.tab', 'workbench')
     return TABS.some((x) => x.id === t) ? (t as Tab) : 'workbench'
   })

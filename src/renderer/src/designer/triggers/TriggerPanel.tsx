@@ -15,6 +15,8 @@ import {
 import { BUILTIN_PRESETS, makePreset, parsePresets, serializePresets, type TriggerPreset } from '../../export/presets'
 import { loadLocal, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
+import { DEFAULT_ZONES, zoneToTravel } from '../../device/triggerCalibration'
+import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
 
 type Side = 'L2' | 'R2'
 
@@ -41,6 +43,8 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const [live, setLive] = useState(true)
   const [presets, setPresets] = useState<TriggerPreset[]>(() => loadLocal('dshd.userPresets', [] as TriggerPreset[]))
   const [msg, setMsg] = useState<string | null>(null)
+  const [calibrating, setCalibrating] = useState(() => location.hash === '#calibrate')
+  const zones = useTriggerCalibration()?.zones ?? DEFAULT_ZONES
 
   const setEffect = (side: Side, e: TriggerEffect) => {
     triggerState[side] = e
@@ -107,6 +111,9 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
         >
           Both off
         </button>
+        <button onClick={() => setCalibrating((c) => !c)} title="Measure where the effect zones sit along the trigger's travel">
+          Calibrate travel…
+        </button>
         <div className="spacer" />
         <button onClick={() => void importPresets()}>Import JSON…</button>
         {!embedded && (
@@ -116,12 +123,14 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
         )}
       </div>
       {msg && <div className="muted small" style={{ marginBottom: 8 }}>{msg}</div>}
+      {calibrating && <CalibrationWizard onClose={() => setCalibrating(false)} />}
       <div className="grid2">
         {(['L2', 'R2'] as Side[]).map((side) => (
           <TriggerEditor
             key={side}
             side={side}
             effect={effects[side]}
+            zones={zones}
             onChange={(e) => setEffect(side, e)}
             onSavePreset={(name) => savePresets([...presets, makePreset(name, side, effects[side])])}
           />
@@ -157,7 +166,7 @@ function PresetRow({ list, onLoad, onDelete }: { list: TriggerPreset[]; onLoad: 
   )
 }
 
-function TriggerEditor({ side, effect, onChange, onSavePreset }: { side: Side; effect: TriggerEffect; onChange: (e: TriggerEffect) => void; onSavePreset: (name: string) => void }) {
+function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: Side; effect: TriggerEffect; zones: number[]; onChange: (e: TriggerEffect) => void; onSavePreset: (name: string) => void }) {
   const [name, setName] = useState('')
   const bytes = encodeTrigger(effect)
   const set = <K extends string>(k: K, v: unknown) => onChange({ ...effect, [k]: v } as TriggerEffect)
@@ -175,8 +184,8 @@ function TriggerEditor({ side, effect, onChange, onSavePreset }: { side: Side; e
         </select>
         <span />
       </div>
-      <EffectParams effect={effect} set={set} onChange={onChange} />
-      <ProfileGraph effect={effect} side={side} />
+      <EffectParams effect={effect} zones={zones} set={set} onChange={onChange} />
+      <ProfileGraph effect={effect} side={side} zones={zones} />
       <div className="mono small muted" style={{ marginTop: 6 }}>
         bytes [{bytes.map((b) => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]
       </div>
@@ -197,8 +206,9 @@ function TriggerEditor({ side, effect, onChange, onSavePreset }: { side: Side; e
   )
 }
 
-function EffectParams({ effect: e, set, onChange }: { effect: TriggerEffect; set: (k: string, v: unknown) => void; onChange: (e: TriggerEffect) => void }) {
-  const zone = (v: number) => `${v * 10}%`
+function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffect; zones: number[]; set: (k: string, v: unknown) => void; onChange: (e: TriggerEffect) => void }) {
+  // zone start as a percentage of the trigger reading (calibrated, or the z×10% guess)
+  const zone = (v: number) => `${Math.round(zoneToTravel(v, zones) * 100)}%`
   switch (e.type) {
     case 'off':
       return <p className="muted small">Trigger moves freely.</p>
@@ -212,8 +222,8 @@ function EffectParams({ effect: e, set, onChange }: { effect: TriggerEffect; set
     case 'weapon':
       return (
         <>
-          <Param label="Start" value={e.start} min={2} max={7} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="Break point" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={zone} />
+          <Param label="Start" value={e.start} min={2} max={7} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={(v) => zone(v + 1)} />
+          <Param label="Break point" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
         </>
       )
@@ -235,19 +245,19 @@ function EffectParams({ effect: e, set, onChange }: { effect: TriggerEffect; set
         </>
       )
     case 'multiFeedback':
-      return <ZoneEditor values={e.strengths} onChange={(v) => set('strengths', v)} label="force" />
+      return <ZoneEditor values={e.strengths} zones={zones} onChange={(v) => set('strengths', v)} label="force" />
     case 'multiVibration':
       return (
         <>
           <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
-          <ZoneEditor values={e.amplitudes} onChange={(v) => set('amplitudes', v)} label="amp" />
+          <ZoneEditor values={e.amplitudes} zones={zones} onChange={(v) => set('amplitudes', v)} label="amp" />
         </>
       )
     case 'bow':
       return (
         <>
           <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="End" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={zone} />
+          <Param label="End" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
           <Param label="Snap force" value={e.snapForce} min={1} max={8} onChange={(v) => set('snapForce', v)} />
         </>
@@ -297,7 +307,7 @@ function EffectParams({ effect: e, set, onChange }: { effect: TriggerEffect; set
   }
 }
 
-function ZoneEditor({ values, onChange, label }: { values: number[]; onChange: (v: number[]) => void; label: string }) {
+function ZoneEditor({ values, zones, onChange, label }: { values: number[]; zones: number[]; onChange: (v: number[]) => void; label: string }) {
   return (
     <div className="zones" style={{ margin: '8px 0' }}>
       {values.map((v, i) => (
@@ -315,7 +325,7 @@ function ZoneEditor({ values, onChange, label }: { values: number[]; onChange: (
             }}
           />
           <span>{v}</span>
-          <span>{i * 10}%</span>
+          <span>{Math.round(zones[i] * 100)}%</span>
         </div>
       ))}
       <div className="small muted" style={{ gridColumn: '1 / -1' }}>
@@ -326,10 +336,12 @@ function ZoneEditor({ values, onChange, label }: { values: number[]; onChange: (
 }
 
 /** Force/vibration vs trigger travel, with the live trigger position overlaid. */
-function ProfileGraph({ effect, side }: { effect: TriggerEffect; side: Side }) {
+function ProfileGraph({ effect, side, zones }: { effect: TriggerEffect; side: Side; zones: number[] }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const effRef = useRef(effect)
   effRef.current = effect
+  const zonesRef = useRef(zones)
+  zonesRef.current = zones
 
   useEffect(() => {
     let raf = 0
@@ -349,10 +361,12 @@ function ProfileGraph({ effect, side }: { effect: TriggerEffect; side: Side }) {
       g.clearRect(0, 0, W, H)
       const pad = 6
       const { force, vibration } = effectProfile(effRef.current, 200)
+      // x is the analog trigger reading; zone coordinates map through the calibration
+      const xOf = (t: number) => pad + (W - 2 * pad) * zoneToTravel(t * 10, zonesRef.current)
       // zones grid
       g.strokeStyle = '#262a35'
       for (let i = 0; i <= 10; i++) {
-        const x = pad + ((W - 2 * pad) * i) / 10
+        const x = xOf(i / 10)
         g.beginPath()
         g.moveTo(x, pad)
         g.lineTo(x, H - pad)
@@ -361,7 +375,7 @@ function ProfileGraph({ effect, side }: { effect: TriggerEffect; side: Side }) {
       const plot = (arr: number[], color: string, fill: string) => {
         g.beginPath()
         g.moveTo(pad, H - pad)
-        arr.forEach((v, i) => g.lineTo(pad + ((W - 2 * pad) * i) / (arr.length - 1), H - pad - v * (H - 2 * pad)))
+        arr.forEach((v, i) => g.lineTo(xOf(i / (arr.length - 1)), H - pad - v * (H - 2 * pad)))
         g.lineTo(W - pad, H - pad)
         g.closePath()
         g.fillStyle = fill
@@ -375,7 +389,7 @@ function ProfileGraph({ effect, side }: { effect: TriggerEffect; side: Side }) {
         g.strokeStyle = '#ffb347'
         g.beginPath()
         vibration.forEach((v, i) => {
-          const x = pad + ((W - 2 * pad) * i) / (vibration.length - 1)
+          const x = xOf(i / (vibration.length - 1))
           const y = H - pad - v * (H - 2 * pad) * (i % 2 ? 1 : 0.6)
           if (i === 0) g.moveTo(x, y)
           else g.lineTo(x, y)

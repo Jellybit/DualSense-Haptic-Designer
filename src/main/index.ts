@@ -35,10 +35,12 @@ function createWindow() {
     }
   })
 
+  // DSHD_START=calibrate opens straight into the trigger calibration (see the .bat files)
+  const hash = process.env['DSHD_START'] ?? ''
   if (process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    void win.loadURL(process.env['ELECTRON_RENDERER_URL'] + (hash ? '#' + hash : ''))
   } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(__dirname, '../renderer/index.html'), { hash })
   }
 }
 

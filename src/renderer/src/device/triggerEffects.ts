@@ -261,10 +261,15 @@ export function effectProfile(e: TriggerEffect, samples = 100): { force: number[
       break
     case 'weapon':
     case 'bow': {
-      // Resistance builds from start to end, then releases (snap)
+      // Resistance builds from start to end, then releases (snap). Measured against the
+      // wall-test calibration: the snap is felt at the END of the end zone (Weapon and Bow),
+      // and a Weapon's resistance also begins at the end of its start zone; a Bow's begins
+      // at the start of its start zone.
+      const begin = e.type === 'weapon' ? e.start + 1 : e.start
+      const stop = e.end + 1
       for (let i = 0; i < samples; i++) {
         const z = (i / (samples - 1)) * 10
-        force[i] = z >= e.start && z < e.end ? (e.strength / 8) * (0.5 + (0.5 * (z - e.start)) / (e.end - e.start)) : 0
+        force[i] = z >= begin && z < stop ? (e.strength / 8) * (0.5 + (0.5 * (z - begin)) / (stop - begin)) : 0
       }
       break
     }

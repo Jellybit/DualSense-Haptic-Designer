@@ -67,6 +67,9 @@ Limits compared with the desktop app:
   3. Press any face button on the controller (✕ ○ □ △) to feel it. Choose *play from start*
      or *play while held*. EQ edits apply live.
   4. Design L2/R2 trigger feedback below.
+     **Calibrate travel…** (or `Run Trigger Calibration.bat`) runs a wall test: ease a trigger
+     into a hidden wall and hold, many times. A line fitted through the holds maps effect zones
+     to real trigger travel, so the graphs and zone labels show where effects are actually felt.
   5. **Export 4-ch WAV** or **Export stereo WAV** (both rendered through the exact same EQs),
      and **Export trigger JSON**.
 - **Controller & Model**: live input readout, IMU axis setup, lightbar, test signals, model
