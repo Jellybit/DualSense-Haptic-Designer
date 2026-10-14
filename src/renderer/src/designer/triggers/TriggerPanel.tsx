@@ -236,14 +236,24 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
         </>
       )
     case 'slope':
+    case 'slopeDown': {
+      // upward keeps end strength ≥ start strength, downward keeps it ≤
+      const up = e.type === 'slope'
       return (
         <>
           <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
           <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={zone} />
-          <Param label="Start strength" value={e.startStrength} min={1} max={8} onChange={(v) => set('startStrength', v)} />
-          <Param label="End strength" value={e.endStrength} min={1} max={8} onChange={(v) => set('endStrength', v)} />
+          <Param
+            label="Start strength"
+            value={e.startStrength}
+            min={1}
+            max={8}
+            onChange={(v) => onChange({ ...e, startStrength: v, endStrength: up ? Math.max(e.endStrength, v) : Math.min(e.endStrength, v) })}
+          />
+          <Param label="End strength" value={e.endStrength} min={up ? e.startStrength : 1} max={up ? 8 : e.startStrength} onChange={(v) => set('endStrength', v)} />
         </>
       )
+    }
     case 'multiFeedback':
       return <ZoneEditor values={e.strengths} zones={zones} onChange={(v) => set('strengths', v)} label="force" />
     case 'multiVibration':
@@ -266,7 +276,7 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
       return (
         <>
           <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={zone} />
+          <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="First foot" value={e.firstFoot} min={0} max={6} onChange={(v) => onChange({ ...e, firstFoot: v, secondFoot: Math.max(e.secondFoot, v + 1) })} />
           <Param label="Second foot" value={e.secondFoot} min={e.firstFoot + 1} max={7} onChange={(v) => set('secondFoot', v)} />
           <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
@@ -276,7 +286,7 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
       return (
         <>
           <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={zone} />
+          <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Amplitude A" value={e.amplitudeA} min={0} max={7} onChange={(v) => set('amplitudeA', v)} />
           <Param label="Amplitude B" value={e.amplitudeB} min={0} max={7} onChange={(v) => set('amplitudeB', v)} />
           <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />

@@ -33,8 +33,8 @@ export type TriggerEffect =
   | { type: 'vibration'; position: number; amplitude: number; frequency: number }
   /** Independent resistance per zone, each 0-8 (0 = none) */
   | { type: 'multiFeedback'; strengths: number[] }
-  /** Linear ramp of resistance from start to end zone. strengths 1-8 */
-  | { type: 'slope'; start: number; end: number; startStrength: number; endStrength: number }
+  /** Linear ramp of resistance from start to end zone: upward (low → high) or downward (high → low). strengths 1-8 */
+  | { type: 'slope' | 'slopeDown'; start: number; end: number; startStrength: number; endStrength: number }
   /** Independent vibration amplitude per zone 0-8, shared frequency */
   | { type: 'multiVibration'; frequency: number; amplitudes: number[] }
   /** Bow string: tension between start and end, then a snap back. */
@@ -52,11 +52,12 @@ export const EFFECT_LABELS: Record<TriggerEffectType, string> = {
   off: 'Off',
   feedback: 'Feedback (resistance)',
   weapon: 'Weapon (click/snap)',
+  bow: 'Bow',
   vibration: 'Vibration',
   multiFeedback: 'Multi-position feedback',
-  slope: 'Slope feedback',
+  slope: 'Slope upward',
+  slopeDown: 'Slope downward',
   multiVibration: 'Multi-position vibration',
-  bow: 'Bow',
   galloping: 'Galloping',
   machine: 'Machine',
   raw: 'Raw bytes',
@@ -70,6 +71,7 @@ export function defaultEffect(type: TriggerEffectType): TriggerEffect {
     case 'vibration': return { type, position: 2, amplitude: 6, frequency: 30 }
     case 'multiFeedback': return { type, strengths: [0, 1, 2, 3, 4, 5, 6, 7, 8, 8] }
     case 'slope': return { type, start: 1, end: 9, startStrength: 1, endStrength: 8 }
+    case 'slopeDown': return { type, start: 1, end: 9, startStrength: 8, endStrength: 1 }
     case 'multiVibration': return { type, frequency: 40, amplitudes: [0, 0, 2, 4, 6, 8, 6, 4, 2, 0] }
     case 'bow': return { type, start: 1, end: 6, strength: 6, snapForce: 8 }
     case 'galloping': return { type, start: 1, end: 9, firstFoot: 2, secondFoot: 5, frequency: 4 }
@@ -167,6 +169,7 @@ export function encodeTrigger(e: TriggerEffect): number[] {
     case 'multiFeedback':
       return multiFeedbackBytes(e.strengths)
     case 'slope':
+    case 'slopeDown':
       return multiFeedbackBytes(slopeStrengths(e.start, e.end, e.startStrength, e.endStrength))
     case 'multiVibration':
       return multiVibrationBytes(e.frequency, e.amplitudes)
@@ -251,6 +254,7 @@ export function effectProfile(e: TriggerEffect, samples = 100): { force: number[
       fillZones(force, e.strengths)
       break
     case 'slope':
+    case 'slopeDown':
       fillZones(force, slopeStrengths(e.start, e.end, e.startStrength, e.endStrength))
       break
     case 'vibration':
@@ -275,9 +279,10 @@ export function effectProfile(e: TriggerEffect, samples = 100): { force: number[
     }
     case 'galloping':
     case 'machine':
+      // Like Weapon/Bow, these run through the END of the end zone (end 9 = up to full pull)
       for (let i = 0; i < samples; i++) {
         const z = (i / (samples - 1)) * 10
-        vibration[i] = z >= e.start && z <= e.end ? (e.type === 'machine' ? Math.max(e.amplitudeA, e.amplitudeB) / 7 : 0.7) : 0
+        vibration[i] = z >= e.start && z < e.end + 1 ? (e.type === 'machine' ? Math.max(e.amplitudeA, e.amplitudeB) / 7 : 0.7) : 0
       }
       break
     case 'raw': {

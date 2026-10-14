@@ -10,7 +10,7 @@ import { ClipsPanel } from './designer/clips/ClipsPanel'
 import { ScenePanel } from './designer/scenes/ScenePanel'
 import { WorkbenchPanel } from './designer/workbench/WorkbenchPanel'
 import { Meter } from './ui/controls'
-import { isElectron, loadBundledModel, platform } from './platform'
+import { loadBundledModel, platform } from './platform'
 
 type Tab = 'workbench' | 'controller' | 'experiments'
 type Experiment = 'scenes' | 'clips'
@@ -208,7 +208,16 @@ function AudioControls() {
     }
   }, [])
 
-  useEffect(() => hapticEngine.onStatus(() => force((x) => x + 1)) as unknown as () => void, [])
+  useEffect(
+    () =>
+      hapticEngine.onStatus(() => {
+        force((x) => x + 1)
+        // the output may have been switched elsewhere (Connect to Controller Vibration)
+        setSink(hapticEngine.sinkId)
+        void refresh()
+      }) as unknown as () => void,
+    [refresh],
+  )
 
   // Start the engine; prefer the DualSense audio endpoint when present.
   useEffect(() => {
@@ -246,19 +255,6 @@ function AudioControls() {
     await hapticEngine.start(id)
   }
 
-  // Browser only: labels stay hidden (and the DualSense unrecognised) until a media permission
-  const needsUnlock = !isElectron && !devices.some((d) => d.isDualSense)
-  const findControllerAudio = async () => {
-    try {
-      const picked = await HapticEngine.unlockOutputLabels()
-      const list = await refresh()
-      const id = picked ?? list.find((d) => d.isDualSense)?.deviceId
-      if (id) await choose(id)
-    } catch (e) {
-      console.warn('Audio permission was not granted', e)
-    }
-  }
-
   const routeLabel =
     hapticEngine.routing === 'dualsense'
       ? `haptics → ch 3/4 (${hapticEngine.channelCount}ch)`
@@ -276,11 +272,6 @@ function AudioControls() {
           </option>
         ))}
       </select>
-      {needsUnlock && (
-        <button className="small" title="Let the browser show audio device names so the controller can be found" onClick={() => void findControllerAudio()}>
-          Find controller audio
-        </button>
-      )}
       <span className="muted small" title={hapticEngine.error ?? ''}>
         {hapticEngine.error ? `audio error: ${hapticEngine.error}` : routeLabel}
       </span>

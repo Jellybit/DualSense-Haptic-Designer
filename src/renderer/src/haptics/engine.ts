@@ -10,6 +10,7 @@
 
 import workletUrl from './synth.worklet.ts?worker&url'
 import type { MixerMessage } from './mixer'
+import { saveLocal } from '../store'
 import { SAMPLE_RATE, type ContinuousParams, type Grain } from './dsp'
 
 export interface OutputDevice {
@@ -80,6 +81,25 @@ export class HapticEngine {
     const stream = await md.getUserMedia({ audio: true })
     stream.getTracks().forEach((t) => t.stop())
     return null
+  }
+
+  /**
+   * Find the controller's audio device and switch haptics to it. In a browser, device
+   * names stay hidden until a media permission is granted, so this asks for one (needs a
+   * user gesture). Returns false when no DualSense audio device is found.
+   */
+  async connectController(): Promise<boolean> {
+    let list = await HapticEngine.listOutputs()
+    let id = list.find((d) => d.isDualSense)?.deviceId
+    if (!id) {
+      const picked = await HapticEngine.unlockOutputLabels()
+      list = await HapticEngine.listOutputs()
+      id = picked ?? list.find((d) => d.isDualSense)?.deviceId
+    }
+    if (!id) return false
+    saveLocal('dshd.sink', id)
+    await this.start(id)
+    return true
   }
 
   /** Start (or restart) on a given output device. '' = system default. */

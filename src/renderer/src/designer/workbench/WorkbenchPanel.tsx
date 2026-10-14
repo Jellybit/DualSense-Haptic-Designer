@@ -7,7 +7,7 @@
 //  5. export a 4-channel WAV (motors on ch 3/4, ch 1/2 silent) + the trigger JSON
 
 import { platform } from '../../platform'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
 import { hapticEngine } from '../../haptics/engine'
 import { SAMPLE_RATE } from '../../haptics/dsp'
@@ -96,7 +96,8 @@ export function WorkbenchPanel() {
   const [playhead, setPlayhead] = useState(0)
   const [mode, setMode] = useState<PlayMode>(() => loadLocal('dshd.workbench.mode', 'restart'))
   const [loop, setLoop] = useState(false)
-  const [volume, setVolume] = useState(1)
+  // Vibration Boost: gain on the motors, applied live and to exported WAVs
+  const [volume, setVolume] = useState(() => loadLocal('dshd.workbench.boost', 1))
   const [dragOver, setDragOver] = useState(false)
   const graph = useRef<PreviewGraph | null>(null)
   const latest = useRef({ audio, eqs, mode, loop })
@@ -217,9 +218,32 @@ export function WorkbenchPanel() {
   useEffect(() => {
     if (graph.current) graph.current.source.loop = loop
   }, [loop])
-  useEffect(() => hapticEngine.setMasterGain(volume), [volume])
+  const [vibrationMsg, setVibrationMsg] = useState<string | null>(null)
+  const connectVibration = async () => {
+    try {
+      const ok = await hapticEngine.connectController()
+      setVibrationMsg(ok ? null : 'No DualSense audio device found. Connect the controller by USB (Bluetooth has no audio device).')
+    } catch {
+      setVibrationMsg('Permission was not granted, so the controller audio device could not be found.')
+    }
+  }
+
+  useEffect(() => {
+    hapticEngine.setMasterGain(volume)
+    saveLocal('dshd.workbench.boost', volume)
+  }, [volume])
   // engine restarts (output device change) invalidate the preview graph
-  useEffect(() => hapticEngine.onStatus(() => graph.current && graph.current.ctx !== hapticEngine.ctx && stopPreview()) as unknown as () => void, [])
+  // Redraw when the audio output changes (the speakers/controller notice depends on it);
+  // a preview playing on the old output's AudioContext has to stop
+  const [, redraw] = useReducer((x: number) => x + 1, 0)
+  useEffect(
+    () =>
+      hapticEngine.onStatus(() => {
+        redraw()
+        if (graph.current && graph.current.ctx !== hapticEngine.ctx) stopPreview()
+      }) as unknown as () => void,
+    [],
+  )
   useEffect(
     () => () => {
       stopPreview()
@@ -295,6 +319,7 @@ export function WorkbenchPanel() {
   const exportWav = async (layout: 'quad' | 'stereo') => {
     if (!audio) return
     const motors = await renderMotors(audio.channels, SAMPLE_RATE, eqs)
+    for (const c of motors) for (let i = 0; i < c.length; i++) c[i] *= volume
     let peak = 0
     for (const c of motors) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]))
     const quad = layout === 'quad'
@@ -303,7 +328,7 @@ export function WorkbenchPanel() {
     const path = await platform.saveFile(name, [{ name: 'WAV', extensions: ['wav'] }], data)
     if (!path) return
     const layoutText = quad ? '4-ch, 48 kHz, 16-bit: motors on ch 3/4, ch 1/2 silent' : '2-ch, 48 kHz, 16-bit: left motor, right motor'
-    setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower some EQ gain to avoid clipping` : ''}`)
+    setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower Vibration Boost or some EQ gain to avoid clipping` : ''}`)
   }
 
   const exportJson = async () => {
@@ -390,18 +415,23 @@ export function WorkbenchPanel() {
               <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> Loop
             </label>
             <div style={{ minWidth: 260, flex: 1 }}>
-              <Param label="Preview volume" value={volume} min={0} max={2} step={0.05} onChange={setVolume} format={(v) => `${Math.round(v * 100)}%`} />
+              <Param label="Vibration Boost" value={volume} min={0} max={2} step={0.05} onChange={setVolume} format={(v) => `${Math.round(v * 100)}%`} />
             </div>
           </div>
           {hapticEngine.channelCount < 4 && (
-            <div className="warnbox small" style={{ marginTop: 8 }}>
-              The selected audio output has only {hapticEngine.channelCount} channels, so both motors are played on it for listening. Pick the 🎮 DualSense output at the top to
-              feel the motors.
+            <div className="warnbox small row" style={{ marginTop: 8 }}>
+              <span style={{ flex: 1 }}>
+                Sound is playing on {hapticEngine.channelCount}-channel speakers, not the controller's grip motors.
+                {vibrationMsg && <> {vibrationMsg}</>}
+              </span>
+              <button className="primary" onClick={() => void connectVibration()}>
+                Connect to Controller Vibration
+              </button>
             </div>
           )}
           <p className="muted small" style={{ marginBottom: 0 }}>
             {info ? 'Press any face button on the controller to play.' : 'Connect the controller to play from its face buttons (or press Space).'} Each grip motor has its
-            own EQ below; edits apply live while playing. Preview volume only affects testing.
+            own EQ below; edits apply live while playing. Vibration Boost also applies to exported WAVs.
           </p>
           {msg && <div className="muted small" style={{ marginTop: 6 }}>{msg}</div>}
         </div>

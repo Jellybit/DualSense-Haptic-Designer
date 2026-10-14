@@ -39,8 +39,8 @@ Limits compared with the desktop app:
   blocked on plain http and `file://`.
 - **Connect DualSense** opens the browser's own device chooser. Pick the controller there.
 - The browser hides audio device names until you grant a permission, so the controller's
-  audio output can't be found automatically. Click **Find controller audio** in the top bar
-  and allow it (Chrome may ask for microphone access; nothing is recorded).
+  audio output can't be found automatically. Click **Connect to Controller Vibration** in the
+  Sound → Grip motors section and allow it (Chrome may ask for microphone access; nothing is recorded).
 - Saving uses a save dialog where the browser supports one, or else a normal download. The
   app can't reopen the last sound or model on the next visit.
 - Bluetooth haptics streaming (report `0x32`) is untested in the browser.
