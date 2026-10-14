@@ -147,33 +147,47 @@ export function ClipsPanel() {
     setSel(clip.id)
   }
 
-  const importWav = async () => {
-    const f = await platform.openFile([{ name: 'WAV audio', extensions: ['wav'] }])
-    if (!f) return
+  /** A sound file as a clip on `track` at `start` s. WAV keeps its ch 3/4 haptics if it has them. */
+  const importSound = async (name: string, data: Uint8Array, track: number, start: number) => {
     try {
-      const a = decodeWav(f.data)
-      const { L, R } = hapticChannels(a)
-      const l = resample(L, a.sampleRate, SAMPLE_RATE)
-      const r = resample(R, a.sampleRate, SAMPLE_RATE)
+      let l: Float32Array, r: Float32Array, info: string
+      try {
+        const a = decodeWav(data)
+        const { L, R } = hapticChannels(a)
+        l = resample(L, a.sampleRate, SAMPLE_RATE)
+        r = resample(R, a.sampleRate, SAMPLE_RATE)
+        info = `${a.channels.length} ch @ ${a.sampleRate} Hz${a.channels.length >= 4 ? ' (used ch 3/4)' : ''}`
+      } catch {
+        // not a WAV the parser knows: let the browser decode it (MP3, OGG, FLAC, …)
+        const buf = await new OfflineAudioContext(1, 1, SAMPLE_RATE).decodeAudioData(data.slice().buffer)
+        l = buf.getChannelData(0)
+        r = buf.numberOfChannels > 1 ? buf.getChannelData(1) : l
+        info = `${buf.numberOfChannels} ch`
+      }
       const clip: Clip = {
         id: uid(),
-        name: f.name.replace(/\.wav$/i, ''),
-        track: selected?.track ?? 0,
-        start: Math.round(playhead * 100) / 100,
+        name: name.replace(/\.[^.]+$/, ''),
+        track,
+        start,
         duration: l.length / SAMPLE_RATE,
         gain: 1,
         attack: 0,
         release: 0,
         panStart: 0,
         panEnd: 0,
-        source: { kind: 'sample', name: f.name, L: Array.from(l, (v) => Math.round(v * 10000) / 10000), R: Array.from(r, (v) => Math.round(v * 10000) / 10000) },
+        source: { kind: 'sample', name, L: Array.from(l, (v) => Math.round(v * 10000) / 10000), R: Array.from(r, (v) => Math.round(v * 10000) / 10000) },
       }
       setProject({ ...project, duration: Math.max(project.duration, clip.start + clip.duration), clips: [...project.clips, clip] })
       setSel(clip.id)
-      setMsg(`Imported ${f.name}: ${a.channels.length} ch @ ${a.sampleRate} Hz${a.channels.length >= 4 ? ' (used ch 3/4)' : ''}`)
+      setMsg(`Imported ${name}: ${info}`)
     } catch (e) {
-      setMsg(`WAV import failed: ${e instanceof Error ? e.message : e}`)
+      setMsg(`Couldn't import ${name}: ${e instanceof Error ? e.message : e}`)
     }
+  }
+
+  const importWav = async () => {
+    const f = await platform.openFile([{ name: 'Sound', extensions: ['wav', 'mp3', 'ogg', 'flac', 'm4a'] }])
+    if (f) await importSound(f.name, f.data, selected?.track ?? 0, Math.round(playhead * 100) / 100)
   }
 
   const exportWav = async (layout: WavLayout) => {
@@ -252,7 +266,7 @@ export function ClipsPanel() {
             {p.name}
           </button>
         ))}
-        <button onClick={() => void importWav()}>WAV…</button>
+        <button onClick={() => void importWav()} title="Import a sound file as a clip (or drop a file onto a track)">Sound…</button>
         <span className="muted" style={{ marginLeft: 8 }}>Trigger key at playhead:</span>
         <button onClick={() => addTriggerKey('L')} title="Uses the current L2 effect from the Adaptive Triggers tab">+L2</button>
         <button onClick={() => addTriggerKey('R')} title="Uses the current R2 effect from the Adaptive Triggers tab">+R2</button>
@@ -271,6 +285,7 @@ export function ClipsPanel() {
         onSelect={(id) => { setSel(id); setSelKey(null) }}
         onSelectKey={(id) => { setSelKey(id); setSel(null) }}
         onMove={(id, start, track) => updateClip(id, { start, track })}
+        onDropFile={(file, track, time) => void file.arrayBuffer().then((b) => importSound(file.name, new Uint8Array(b), track, time))}
         onResize={(id, duration) => updateClip(id, { duration })}
         onMoveKey={(id, time) => setProject({ ...project, triggerKeys: project.triggerKeys.map((k) => (k.id === id ? { ...k, time } : k)) })}
         onTrack={(i, patch) => setProject({ ...project, tracks: project.tracks.map((t, j) => (j === i ? { ...t, ...patch } : t)) })}
@@ -301,7 +316,7 @@ export function ClipsPanel() {
       )}
       {!selected && !selectedKey && (
         <p className="muted small">
-          Click a clip to edit it. Drag clips to move (across tracks too), drag the right edge to resize. <kbd>Space</kbd> plays/stops, any face button on the controller plays from the start, <kbd>Del</kbd> deletes. Pan −1 = left
+          Click a clip to edit it. Drag clips to move (across tracks too), drag the right edge to resize, drop a sound file onto a track to add it there. <kbd>Space</kbd> plays/stops, any face button on the controller plays from the start, <kbd>Del</kbd> deletes. Pan −1 = left
           grip, +1 = right grip — sweeping pan across a clip makes the sensation travel through the controller.
         </p>
       )}
@@ -319,6 +334,8 @@ function Timeline(props: {
   onSelect: (id: string) => void
   onSelectKey: (id: string) => void
   onMove: (id: string, start: number, track: number) => void
+  /** a sound file dropped onto track `track` at `time` s */
+  onDropFile: (file: File, track: number, time: number) => void
   onResize: (id: string, duration: number) => void
   onMoveKey: (id: string, time: number) => void
   onTrack: (i: number, patch: Partial<HapticProject['tracks'][number]>) => void
@@ -330,6 +347,7 @@ function Timeline(props: {
 
   const drag = (e: React.PointerEvent, clip: Clip, mode: 'move' | 'resize') => {
     e.stopPropagation()
+    e.preventDefault() // no text selection or native drag of the clip
     props.onSelect(clip.id)
     const x0 = e.clientX
     const y0 = e.clientY
@@ -350,10 +368,33 @@ function Timeline(props: {
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
+
+  // dropping a sound file onto a track
+  const [dropTrack, setDropTrack] = useState<number | null>(null)
+  const dropProps = (i: number) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes('Files')) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      if (dropTrack !== i) setDropTrack(i)
+    },
+    onDragLeave: () => setDropTrack(null),
+    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      setDropTrack(null)
+      const file = e.dataTransfer.files[0]
+      if (!file) return
+      const r = e.currentTarget.getBoundingClientRect()
+      const t = Math.max(0, Math.round(((e.clientX - r.left) / pps) * 20) / 20)
+      props.onDropFile(file, i, t)
+    },
+  })
 
   const dragKey = (e: React.PointerEvent, k: TriggerKey) => {
     e.stopPropagation()
@@ -398,7 +439,7 @@ function Timeline(props: {
                   <button className={tr.solo ? 'active' : ''} onClick={() => props.onTrack(i, { solo: !tr.solo })}>S</button>
                 </div>
               </div>
-              <div className="tl-lane" style={{ width }} onMouseDown={seekFrom}>
+              <div className={`tl-lane ${dropTrack === i ? 'drop' : ''}`} style={{ width }} onMouseDown={seekFrom} {...dropProps(i)}>
                 {project.clips
                   .filter((c) => c.track === i)
                   .map((c) => (
@@ -406,6 +447,7 @@ function Timeline(props: {
                       key={c.id}
                       className={`tl-clip ${props.sel === c.id ? 'sel' : ''}`}
                       style={{ left: c.start * pps, width: Math.max(6, c.duration * pps), background: panColor(c) }}
+                      draggable={false}
                       onPointerDown={(e) => drag(e, c, 'move')}
                       onMouseDown={(e) => e.stopPropagation()}
                       title={`${c.name} · ${c.duration.toFixed(2)}s`}

@@ -376,6 +376,10 @@ table.rig tr.hit td {
   position: relative;
 }
 .tl-clip {
+  /* no text selection / native drag, or the browser drags a ghost copy instead of moving the clip */
+  user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
   position: absolute;
   top: 4px;
   bottom: 4px;
@@ -387,6 +391,9 @@ table.rig tr.hit td {
   overflow: hidden;
   white-space: nowrap;
   cursor: grab;
+}
+.tl-lane.drop {
+  background: rgba(77, 124, 255, 0.18);
 }
 .tl-clip.sel {
   outline: 2px solid white;
