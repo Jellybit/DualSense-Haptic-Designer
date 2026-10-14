@@ -3,7 +3,7 @@ import { crc32, crc32Seeded } from '../src/renderer/src/device/crc32'
 import { decodeTrigger, effectProfile, encodeTrigger, slopeStrengths } from '../src/renderer/src/device/triggerEffects'
 import { buildBtHaptics, buildBtOutput, buildCommon, buildUsbOutput } from '../src/renderer/src/device/outputReport'
 import { emptyInputState, parseCalibration, parseInputReport } from '../src/renderer/src/device/inputReport'
-import { parsePresets, serializePresets, BUILTIN_PRESETS } from '../src/renderer/src/export/presets'
+import { makePreset, parsePresets, serializePresets } from '../src/renderer/src/export/presets'
 
 describe('crc32', () => {
   it('matches the standard check value', () => {
@@ -62,9 +62,13 @@ describe('trigger effects', () => {
   })
 
   it('preset JSON round-trips bytes', () => {
-    const text = serializePresets(BUILTIN_PRESETS)
-    const back = parsePresets(text)
-    expect(back.map((p) => p.raw)).toEqual(BUILTIN_PRESETS.map((p) => encodeTrigger(p.effect)))
+    const list = [
+      makePreset('Pistol', 'R2', { type: 'weapon', start: 4, end: 7, strength: 8 }),
+      makePreset('Ramp', 'L2', { type: 'forceCurve', points: [{ x: 1, y: 0 }, { x: 9, y: 8 }] }),
+      makePreset('Gallop', 'both', { type: 'galloping', start: 0, end: 9, firstFoot: 2, secondFoot: 5, frequency: 3 }),
+    ]
+    const back = parsePresets(serializePresets(list))
+    expect(back.map((p) => p.raw)).toEqual(list.map((p) => encodeTrigger(p.effect)))
   })
 })
 

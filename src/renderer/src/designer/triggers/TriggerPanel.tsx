@@ -7,18 +7,21 @@ import { dualSense } from '../../device/hid'
 import {
   defaultEffect,
   effectProfile,
+  EFFECT_GROUPS,
   EFFECT_LABELS,
-  EFFECT_MENU,
+  effectGroup,
   encodeTrigger,
+  curveFrequency,
   toCurveEffect,
+  zoneFrequencies,
   type CurvePoint,
   type TriggerEffect,
   type TriggerEffectType,
 } from '../../device/triggerEffects'
-import { BUILTIN_PRESETS, makePreset, parsePresets, serializePresets, type TriggerPreset } from '../../export/presets'
+import { makePreset, parsePresets, serializePresets } from '../../export/presets'
 import { loadLocal, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
-import { travelToZone, zonesFor, zoneToTravel } from '../../device/triggerCalibration'
+import { getCalibration, travelToZone, zonesFor, zoneToTravel } from '../../device/triggerCalibration'
 import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
 
 type Side = 'L2' | 'R2'
@@ -28,8 +31,14 @@ export const triggerState: Record<Side, TriggerEffect> = {
   R2: toCurveEffect(loadLocal<TriggerEffect>('dshd.trig.R2', { type: 'off' })),
 }
 
+/** The zone (0-9) the trigger is in now, through the calibration. */
+function currentZone(side: Side): number {
+  const analog = side === 'L2' ? dualSense.state.l2 : dualSense.state.r2
+  return Math.min(9, Math.floor(travelToZone(analog, zonesFor(getCalibration(), side))))
+}
+
 export function applyTrigger(side: Side, e: TriggerEffect) {
-  const bytes = encodeTrigger(e)
+  const bytes = encodeTrigger(e, currentZone(side))
   return side === 'L2' ? dualSense.setTriggers(bytes, undefined) : dualSense.setTriggers(undefined, bytes)
 }
 
@@ -44,13 +53,12 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const info = useConnection()
   const [effects, setEffects] = useState(triggerState)
   const [live, setLive] = useState(true)
-  const [presets, setPresets] = useState<TriggerPreset[]>(() => loadLocal('dshd.userPresets', [] as TriggerPreset[]))
   const [msg, setMsg] = useState<string | null>(null)
   const [calibrating, setCalibrating] = useState(() => location.hash === '#calibrate')
   const calibration = useTriggerCalibration()
 
   const setEffect = (side: Side, effect: TriggerEffect) => {
-    // presets and imports may hold the older slider-style effects
+    // imports may hold retired effects (slider-style ones, Bow)
     const e = toCurveEffect(effect)
     triggerState[side] = e
     saveLocal(`dshd.trig.${side}`, e)
@@ -64,29 +72,41 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
     void applyTrigger('R2', effects.R2)
   }, [effects, live, info])
 
-  const savePresets = (p: TriggerPreset[]) => {
-    setPresets(p)
-    saveLocal('dshd.userPresets', p)
+  // Vibration curves have a frequency per zone but the controller takes one per effect, so
+  // re-send when the trigger moves into a zone with a different frequency (not while the
+  // calibration wizard owns the triggers)
+  useEffect(() => {
+    if (!live || !info || calibrating) return
+    const sent: Record<Side, number> = { L2: -1, R2: -1 }
+    return dualSense.onInput(() => {
+      for (const side of ['L2', 'R2'] as Side[]) {
+        const e = triggerState[side]
+        if (e.type !== 'vibrationCurve') continue
+        const freq = zoneFrequencies(e)[currentZone(side)]
+        if (freq !== sent[side]) {
+          sent[side] = freq
+          void applyTrigger(side, e)
+        }
+      }
+    }) as unknown as () => void
+  }, [live, info, calibrating])
+
+  const exportJson = async () => {
+    const path = await exportTriggerJson('triggers')
+    if (path) setMsg(`Exported L2 and R2 to ${path}`)
   }
 
-  const exportPresets = async () => {
-    const all = presets.length ? presets : [makePreset('L2', 'L2', effects.L2), makePreset('R2', 'R2', effects.R2)]
-    const path = await platform.saveFile(downloadName('trigger-presets', 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(all))
-    if (path) setMsg(`Exported ${all.length} preset(s) to ${path}`)
-  }
-
-  const importPresets = async () => {
+  /** Load a trigger JSON file's L2/R2 effects onto the triggers (an entry for both applies to both). */
+  const importJson = async () => {
     const f = await platform.openFile([{ name: 'JSON', extensions: ['json'] }])
     if (!f) return
     try {
       const list = parsePresets(new TextDecoder().decode(f.data))
-      savePresets([...presets, ...list])
-      // a file with explicit L2/R2 entries (e.g. one exported from here) also loads onto the triggers
-      const l2 = list.find((p) => p.trigger === 'L2')
-      const r2 = list.find((p) => p.trigger === 'R2')
+      const l2 = list.find((p) => p.trigger === 'L2') ?? list.find((p) => p.trigger === 'both')
+      const r2 = list.find((p) => p.trigger === 'R2') ?? list.find((p) => p.trigger === 'both')
       if (l2) setEffect('L2', l2.effect)
       if (r2) setEffect('R2', r2.effect)
-      setMsg(`Imported ${list.length} preset(s)${l2 || r2 ? ' and applied them to the triggers' : ''}`)
+      setMsg(l2 || r2 ? `Loaded ${[l2 && 'L2', r2 && 'R2'].filter(Boolean).join(' and ')} from ${f.name}` : `No trigger effects found in ${f.name}`)
     } catch (e) {
       setMsg(`Import failed: ${e instanceof Error ? e.message : e}`)
     }
@@ -94,7 +114,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <>
-      {!info && <div className="warnbox">Connect a controller to feel the effects. You can still design and export presets.</div>}
+      {!info && <div className="warnbox">Connect a controller to feel the effects. You can still design and export trigger effects.</div>}
       <div className="row" style={{ marginBottom: 10 }}>
         <label className="row">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Send changes live
@@ -120,9 +140,9 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
           Calibrate travel…
         </button>
         <div className="spacer" />
-        <button onClick={() => void importPresets()}>Import JSON…</button>
+        <button onClick={() => void importJson()}>Import JSON…</button>
         {!embedded && (
-          <button className="primary" onClick={() => void exportPresets()}>
+          <button className="primary" onClick={() => void exportJson()}>
             Export JSON…
           </button>
         )}
@@ -137,57 +157,41 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
             effect={effects[side]}
             zones={zonesFor(calibration, side)}
             onChange={(e) => setEffect(side, e)}
-            onSavePreset={(name) => savePresets([...presets, makePreset(name, side, effects[side])])}
           />
         ))}
       </div>
-      <Card title="Preset library">
-        <div className="small muted" style={{ marginBottom: 6 }}>Built-in — click L2/R2 to load</div>
-        <PresetRow list={BUILTIN_PRESETS} onLoad={(p, side) => setEffect(side, p.effect)} />
-        <div className="small muted" style={{ margin: '10px 0 6px' }}>Yours (saved locally; export to share with your game)</div>
-        {presets.length === 0 && <div className="muted small">No saved presets yet.</div>}
-        <PresetRow list={presets} onLoad={(p, side) => setEffect(side, p.effect)} onDelete={(i) => savePresets(presets.filter((_, j) => j !== i))} />
-      </Card>
     </>
   )
 }
 
-function PresetRow({ list, onLoad, onDelete }: { list: TriggerPreset[]; onLoad: (p: TriggerPreset, s: Side) => void; onDelete?: (i: number) => void }) {
-  return (
-    <div className="preset-list">
-      {list.map((p, i) => (
-        <span key={`${p.name}${i}`} className="row" style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '3px 6px', gap: 4 }}>
-          <span>{p.name}</span>
-          <button className="small" onClick={() => onLoad(p, 'L2')}>L2</button>
-          <button className="small" onClick={() => onLoad(p, 'R2')}>R2</button>
-          {onDelete && (
-            <button className="small danger" onClick={() => onDelete(i)}>
-              ×
-            </button>
-          )}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: Side; effect: TriggerEffect; zones: number[]; onChange: (e: TriggerEffect) => void; onSavePreset: (name: string) => void }) {
-  const [name, setName] = useState('')
+function TriggerEditor({ side, effect, zones, onChange }: { side: Side; effect: TriggerEffect; zones: number[]; onChange: (e: TriggerEffect) => void }) {
   const bytes = encodeTrigger(effect)
   const set = <K extends string>(k: K, v: unknown) => onChange({ ...effect, [k]: v } as TriggerEffect)
+  const group = EFFECT_GROUPS.find((g) => g.id === effectGroup(effect.type))!
 
   return (
     <Card title={`${side} trigger`}>
-      <div className="param">
-        <label>Effect</label>
-        <select value={effect.type} onChange={(e) => onChange(defaultEffect(e.target.value as TriggerEffectType))}>
-          {EFFECT_MENU.map((t) => (
-            <option key={t} value={t}>
-              {EFFECT_LABELS[t]}
+      <div className="row" style={{ marginBottom: 6 }}>
+        <select
+          value={group.id}
+          title="Effect"
+          onChange={(e) => onChange(defaultEffect(EFFECT_GROUPS.find((g) => g.id === e.target.value)!.types[0]))}
+        >
+          {EFFECT_GROUPS.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.label}
             </option>
           ))}
         </select>
-        <span />
+        {group.types.length > 1 && (
+          <select value={effect.type} title="Type" onChange={(e) => onChange(defaultEffect(e.target.value as TriggerEffectType))}>
+            {group.types.map((t) => (
+              <option key={t} value={t}>
+                {EFFECT_LABELS[t]}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <EffectParams effect={effect} zones={zones} set={set} onChange={onChange} />
       <ProfileGraph effect={effect} side={side} zones={zones} onPoints={(points) => set('points', points)} />
@@ -195,16 +199,6 @@ function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: 
         bytes [{bytes.map((b) => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]
       </div>
       <div className="row" style={{ marginTop: 8 }}>
-        <input type="text" placeholder="Preset name" value={name} onChange={(e) => setName(e.target.value)} />
-        <button
-          disabled={!name.trim()}
-          onClick={() => {
-            onSavePreset(name.trim())
-            setName('')
-          }}
-        >
-          Save preset
-        </button>
         <button onClick={() => void navigator.clipboard.writeText(JSON.stringify(bytes))}>Copy bytes</button>
       </div>
     </Card>
@@ -224,10 +218,10 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
       return <p className="muted small">Draw the resistance along the trigger's travel. The blue blocks are what each zone gets (strength 0–8).</p>
     case 'vibrationCurve':
       return (
-        <>
-          <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
-          <p className="muted small">Draw the vibration strength along the trigger's travel. One frequency applies to the whole trigger.</p>
-        </>
+        <p className="muted small">
+          Draw the vibration strength along the trigger's travel. Frequency is set per point: select a point to change it. It
+          blends between points and changes zone by zone as you press.
+        </p>
       )
     case 'weapon':
       return (
@@ -235,15 +229,6 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
           <Param label="Start" value={e.start} min={2} max={7} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={(v) => zone(v + 1)} />
           <Param label="Break point" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
-        </>
-      )
-    case 'bow':
-      return (
-        <>
-          <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="End" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
-          <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
-          <Param label="Snap force" value={e.snapForce} min={1} max={8} onChange={(v) => set('snapForce', v)} />
         </>
       )
     case 'galloping':
@@ -376,6 +361,17 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
         })
         g.stroke()
       }
+      // vibration curves: each zone's frequency along the top
+      if (eff.type === 'vibrationCurve') {
+        const freqs = zoneFrequencies(eff)
+        g.fillStyle = '#c9a25f'
+        g.font = '10px Segoe UI'
+        g.textAlign = 'center'
+        freqs.forEach((fz, z) => {
+          if (px(z + 1) - px(z) >= 16) g.fillText(String(fz), (px(z) + px(z + 1)) / 2, PAD + 9)
+        })
+        g.textAlign = 'start'
+      }
       // the drawn curve and its points (the blocks/band above are what the trigger gets)
       if (isCurve(eff) && eff.points.length) {
         const pts = eff.points
@@ -444,7 +440,10 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
       const z = zoneAt(x)
       hit = points.findIndex((p) => p.x > z)
       if (hit < 0) hit = points.length
-      setPoints([...points.slice(0, hit), { x: z, y: strengthAt(y) }, ...points.slice(hit)])
+      const eff = effRef.current
+      const pt: CurvePoint = { x: z, y: strengthAt(y) }
+      if (eff.type === 'vibrationCurve') pt.f = Math.round(curveFrequency(eff.points, z, eff.frequency))
+      setPoints([...points.slice(0, hit), pt, ...points.slice(hit)])
     }
     setSelected(hit)
     drag.current = hit
@@ -463,7 +462,7 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
     const lo = i > 0 ? pts[i - 1].x : 0
     const hi = i < pts.length - 1 ? pts[i + 1].x : 10
     const next = [...pts]
-    next[i] = { x: Math.min(hi, Math.max(lo, zoneAt(x))), y: strengthAt(y) }
+    next[i] = { ...pts[i], x: Math.min(hi, Math.max(lo, zoneAt(x))), y: strengthAt(y) }
     setPoints(next)
   }
 
@@ -474,6 +473,11 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
   }
 
   const sel = selected !== null ? points[selected] : null
+  const vib = effect.type === 'vibrationCurve' ? effect : null
+  const setSelectedFrequency = (hz: number) => {
+    if (selected === null) return
+    setPoints(points.map((p, i) => (i === selected ? { ...p, f: hz } : p)))
+  }
   return (
     <>
       <canvas
@@ -499,9 +503,15 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
               <span className="mono">
                 point at {Math.round(zoneToTravel(sel.x, zones) * 100)}% travel, strength {sel.y.toFixed(1)}
               </span>
+              <div className="spacer" />
               <button className="small danger" onClick={deleteSelected}>
                 Delete point
               </button>
+              {vib && (
+                <div style={{ flexBasis: '100%' }}>
+                  <Param label="Frequency (Hz)" value={sel.f ?? vib.frequency} min={1} max={255} onChange={setSelectedFrequency} />
+                </div>
+              )}
             </>
           ) : (
             <span className="muted">Click to add a point · drag a point to move it · click a point, then Delete to remove it</span>

@@ -22,10 +22,14 @@ export const TriggerMode = {
   LimitedWeapon: 0x12,
 } as const
 
-/** A point of a drawn curve: x = zone coordinate 0-10 (zone z spans z..z+1), y = strength 0-8. */
+/**
+ * A point of a drawn curve: x = zone coordinate 0-10 (zone z spans z..z+1), y = strength 0-8.
+ * Vibration points also carry a frequency `f` (Hz); a missing `f` uses the effect's `frequency`.
+ */
 export interface CurvePoint {
   x: number
   y: number
+  f?: number
 }
 
 /**
@@ -37,7 +41,12 @@ export type TriggerEffect =
   | { type: 'off' }
   /** Resistance drawn as a straight-line curve; each zone gets the curve's value at its centre. */
   | { type: 'forceCurve'; points: CurvePoint[] }
-  /** Vibration strength drawn the same way, with one frequency (1-255 Hz) for the whole trigger. */
+  /**
+   * Vibration strength drawn the same way. Frequency is set per point and interpolated, but the
+   * controller takes one frequency per effect, so it is applied per zone: the effect is re-sent
+   * with the current zone's frequency as the trigger moves (see zoneFrequencies). `frequency`
+   * (1-255 Hz) is the fallback for points without their own.
+   */
   | { type: 'vibrationCurve'; points: CurvePoint[]; frequency: number }
   /** Constant resistance from `position` (0-9) to the end. strength 1-8 */
   | { type: 'feedback'; position: number; strength: number }
@@ -62,15 +71,26 @@ export type TriggerEffect =
 
 export type TriggerEffectType = TriggerEffect['type']
 
-/** What the effect menu offers, in order. */
-export const EFFECT_MENU: TriggerEffectType[] = ['off', 'forceCurve', 'vibrationCurve', 'weapon', 'bow', 'galloping', 'machine', 'raw']
+/** The editor's first dropdown; each group's types form the second dropdown (Custom = the graph editor first). */
+export const EFFECT_GROUPS = [
+  { id: 'off', label: 'Off', types: ['off'] },
+  { id: 'force', label: 'Force', types: ['forceCurve', 'weapon'] },
+  { id: 'vibration', label: 'Vibration', types: ['vibrationCurve', 'galloping', 'machine'] },
+  { id: 'raw', label: 'Raw bytes', types: ['raw'] },
+] as const satisfies readonly { id: string; label: string; types: readonly TriggerEffectType[] }[]
+
+export type EffectGroup = (typeof EFFECT_GROUPS)[number]['id']
+
+export function effectGroup(t: TriggerEffectType): EffectGroup {
+  return EFFECT_GROUPS.find((g) => (g.types as readonly TriggerEffectType[]).includes(t))?.id ?? 'raw'
+}
 
 export const EFFECT_LABELS: Record<TriggerEffectType, string> = {
   off: 'Off',
-  forceCurve: 'Force curve',
-  vibrationCurve: 'Vibration curve',
+  forceCurve: 'Custom',
+  vibrationCurve: 'Custom',
   feedback: 'Feedback (resistance)',
-  weapon: 'Weapon (click/snap)',
+  weapon: 'Weapon',
   bow: 'Bow',
   vibration: 'Vibration',
   multiFeedback: 'Multi-position feedback',
@@ -86,7 +106,7 @@ export function defaultEffect(type: TriggerEffectType): TriggerEffect {
   switch (type) {
     case 'off': return { type }
     case 'forceCurve': return { type, points: [{ x: 1, y: 0 }, { x: 9, y: 8 }] }
-    case 'vibrationCurve': return { type, points: [{ x: 2, y: 0 }, { x: 3, y: 6 }], frequency: 30 }
+    case 'vibrationCurve': return { type, points: [{ x: 2, y: 0, f: 30 }, { x: 3, y: 6, f: 30 }], frequency: 30 }
     case 'feedback': return { type, position: 3, strength: 6 }
     case 'weapon': return { type, start: 3, end: 6, strength: 8 }
     case 'vibration': return { type, position: 2, amplitude: 6, frequency: 30 }
@@ -149,14 +169,29 @@ function multiVibrationBytes(frequency: number, amplitudes: number[]): number[] 
 
 /** Curve value at zone coordinate x; flat before the first point and after the last. */
 export function curveValue(points: CurvePoint[], x: number): number {
+  return interpolate(points, x, (p) => p.y)
+}
+
+/** Straight-line interpolation of a per-point value along x; flat outside the points. */
+function interpolate(points: CurvePoint[], x: number, value: (p: CurvePoint) => number): number {
   if (!points.length) return 0
-  if (x <= points[0].x) return points[0].y
+  if (x <= points[0].x) return value(points[0])
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]
     const b = points[i + 1]
-    if (x < b.x) return b.x === a.x ? b.y : a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x)
+    if (x < b.x) return b.x === a.x ? value(b) : value(a) + ((value(b) - value(a)) * (x - a.x)) / (b.x - a.x)
   }
-  return points[points.length - 1].y
+  return value(points[points.length - 1])
+}
+
+/** Interpolated vibration frequency (Hz) at zone coordinate x. */
+export function curveFrequency(points: CurvePoint[], x: number, fallback: number): number {
+  return points.length ? interpolate(points, x, (p) => p.f ?? fallback) : fallback
+}
+
+/** Per-zone frequency 1-255 Hz of a vibration curve: the interpolated frequency at each zone's centre. */
+export function zoneFrequencies(e: { points: CurvePoint[]; frequency: number }): number[] {
+  return Array.from({ length: 10 }, (_, z) => clamp(curveFrequency(e.points, z + 0.5, e.frequency), 1, 255))
 }
 
 /** Per-zone strengths 0-8 from a curve: its value at each zone's centre, rounded. */
@@ -178,8 +213,16 @@ export function pointsFromStrengths(strengths: number[]): CurvePoint[] {
   return out
 }
 
-/** Convert the older slider-style effects to curves; other effects are returned unchanged. */
+/**
+ * Convert retired effects to current ones: the older slider-style effects become curves,
+ * and Bow (which feels identical to Weapon on the controller) becomes a Weapon.
+ * Other effects are returned unchanged.
+ */
 export function toCurveEffect(e: TriggerEffect): TriggerEffect {
+  if (e.type === 'bow') {
+    const start = clamp(e.start, 2, 7)
+    return { type: 'weapon', start, end: clamp(e.end, start + 1, 8), strength: e.strength }
+  }
   if (!['feedback', 'slope', 'slopeDown', 'multiFeedback', 'vibration', 'multiVibration'].includes(e.type)) return e
   const b = encodeTrigger(e)
   if (b[0] === TriggerMode.Feedback) return { type: 'forceCurve', points: pointsFromStrengths(unpackZones(b).values) }
@@ -201,8 +244,12 @@ export function slopeStrengths(start: number, end: number, s0: number, s1: numbe
   return out
 }
 
-/** Encode an effect to the 11 bytes written into the output report. */
-export function encodeTrigger(e: TriggerEffect): number[] {
+/**
+ * Encode an effect to the 11 bytes written into the output report. `zone` (0-9, where the
+ * trigger currently is) picks a vibration curve's frequency; without it, the first vibrating
+ * zone's frequency is used.
+ */
+export function encodeTrigger(e: TriggerEffect, zone?: number): number[] {
   switch (e.type) {
     case 'off':
       return [TriggerMode.Off, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -229,8 +276,11 @@ export function encodeTrigger(e: TriggerEffect): number[] {
     }
     case 'forceCurve':
       return multiFeedbackBytes(curveStrengths(e.points))
-    case 'vibrationCurve':
-      return multiVibrationBytes(e.frequency, curveStrengths(e.points))
+    case 'vibrationCurve': {
+      const amps = curveStrengths(e.points)
+      const z = zone ?? Math.max(0, amps.findIndex((a) => a > 0))
+      return multiVibrationBytes(zoneFrequencies(e)[clamp(z, 0, 9)], amps)
+    }
     case 'multiFeedback':
       return multiFeedbackBytes(e.strengths)
     case 'slope':

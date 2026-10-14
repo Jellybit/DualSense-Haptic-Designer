@@ -13,13 +13,19 @@
 // (USB report 0x02 offsets 11..21 for R2 / 22..32 for L2 counting the report ID).
 // Games only need `raw`; `effect` lets the designer re-open the preset for editing.
 
-import { decodeTrigger, encodeTrigger, toCurveEffect, type TriggerEffect } from '../device/triggerEffects'
+import { decodeTrigger, encodeTrigger, toCurveEffect, zoneFrequencies, type TriggerEffect } from '../device/triggerEffects'
 
 export interface TriggerPreset {
   name: string
   trigger: 'L2' | 'R2' | 'both'
   effect: TriggerEffect
   raw: number[]
+  /**
+   * Vibration curves only: the frequency (Hz) for each of the 10 zones. The controller takes one
+   * frequency per effect, so to follow the curve a game re-sends `raw` with byte 9 set to the
+   * frequency of the zone the trigger is in, whenever that changes.
+   */
+  zoneFrequencies?: number[]
 }
 
 export interface PresetFile {
@@ -31,14 +37,14 @@ export interface PresetFile {
 /** Older slider-style effects are stored as curves. */
 export function makePreset(name: string, trigger: TriggerPreset['trigger'], effect: TriggerEffect): TriggerPreset {
   const e = toCurveEffect(effect)
-  return { name, trigger, effect: e, raw: encodeTrigger(e) }
+  return { name, trigger, effect: e, raw: encodeTrigger(e), ...(e.type === 'vibrationCurve' ? { zoneFrequencies: zoneFrequencies(e) } : {}) }
 }
 
 export function serializePresets(presets: TriggerPreset[]): string {
   const file: PresetFile = {
     format: 'dualsense-trigger-presets',
     version: 1,
-    presets: presets.map((p) => ({ ...p, raw: encodeTrigger(p.effect) })),
+    presets: presets.map((p) => makePreset(p.name, p.trigger, p.effect)),
   }
   return JSON.stringify(file, null, 2)
 }
@@ -58,18 +64,3 @@ export function parsePresets(text: string): TriggerPreset[] {
     return makePreset(p.name ?? `Preset ${i + 1}`, p.trigger ?? 'both', effect)
   })
 }
-
-export const BUILTIN_PRESETS: TriggerPreset[] = [
-  makePreset('Off', 'both', { type: 'off' }),
-  makePreset('Pistol', 'R2', { type: 'weapon', start: 4, end: 7, strength: 8 }),
-  makePreset('Shotgun (heavy)', 'R2', { type: 'weapon', start: 2, end: 7, strength: 8 }),
-  makePreset('Brake pedal', 'L2', { type: 'slope', start: 1, end: 9, startStrength: 1, endStrength: 8 }),
-  makePreset('Accelerator', 'R2', { type: 'feedback', position: 0, strength: 3 }),
-  makePreset('Stiff spring', 'both', { type: 'feedback', position: 1, strength: 8 }),
-  makePreset('Bow draw', 'R2', { type: 'bow', start: 1, end: 6, strength: 6, snapForce: 8 }),
-  makePreset('Machine gun', 'R2', { type: 'vibration', position: 3, amplitude: 8, frequency: 18 }),
-  makePreset('Engine idle', 'R2', { type: 'machine', start: 1, end: 9, amplitudeA: 3, amplitudeB: 6, frequency: 25, period: 6 }),
-  makePreset('Horse gallop', 'both', { type: 'galloping', start: 0, end: 9, firstFoot: 2, secondFoot: 5, frequency: 3 }),
-  makePreset('Rumble strip', 'both', { type: 'multiVibration', frequency: 35, amplitudes: [0, 0, 3, 6, 8, 8, 6, 3, 0, 0] }),
-  makePreset('Detent click', 'both', { type: 'multiFeedback', strengths: [0, 0, 0, 0, 8, 0, 0, 0, 0, 0] }),
-]

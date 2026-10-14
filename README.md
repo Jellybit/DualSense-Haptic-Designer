@@ -94,9 +94,12 @@ Limits compared with the desktop app:
 - **Clip composer WAV, stereo** (Experiments): ch1 = left actuator, ch2 = right actuator, 48 kHz 16-bit.
 - **Clip composer WAV, 4-ch** (Experiments): ch1/2 silent (speaker/headset), ch3/4 = actuators. Play it straight to
   the controller's audio endpoint on PC.
-- **Trigger presets** (`*.json`): `{ format: "dualsense-trigger-presets", presets: [{ name,
+- **Trigger JSON** (`*.triggers.json`, the L2/R2 effects): `{ format: "dualsense-trigger-presets", presets: [{ name,
   trigger, effect, raw }] }`. `raw` is the 11 bytes to copy into the trigger block of the
   output report (USB report 0x02: bytes 11–21 = R2, 22–32 = L2, counting the report ID).
+  Vibration curves also carry `zoneFrequencies` (10 values, Hz): the controller takes one
+  frequency per effect, so to follow the curve, re-send `raw` with byte 9 set to the frequency of
+  the zone the trigger is in whenever that zone changes (the app does this live).
 - **Trigger timeline** (`*.triggers.json`, written next to a clip WAV when it has trigger
   keys): `{ keys: [{ time, trigger, effect, raw }] }`.
 - **Scenes** (`*.scene.json`) and **clip projects** (`*.dshd.json`) can be re-opened in the
