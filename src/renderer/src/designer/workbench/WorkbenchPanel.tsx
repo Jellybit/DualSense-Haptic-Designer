@@ -9,7 +9,10 @@
 import { platform } from '../../platform'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
-import { hapticEngine } from '../../haptics/engine'
+import { hapticEngine, HapticEngine, type OutputDevice } from '../../haptics/engine'
+import { currentPcContext, pcContext } from '../../haptics/pcAudio'
+import { loadLastSound, saveLastSound } from '../../lastSound'
+import { confirmReset, onReset, RESET_LABELS, resetSection } from '../../resets'
 import { SAMPLE_RATE } from '../../haptics/dsp'
 import {
   audioBufferFrom,
@@ -33,6 +36,51 @@ import { Card, downloadName, Param } from '../../ui/controls'
 import { exportTriggerJson, TriggerPanel } from '../triggers/TriggerPanel'
 
 const FACE_BUTTONS = ['cross', 'circle', 'square', 'triangle'] as const
+
+/** What a playback sends where: grip motors, the controller's speaker (ch 1/2), the PC output. */
+interface PlayTarget {
+  vibration: boolean
+  speaker: boolean
+  pc: boolean
+}
+const VIBRATION_ONLY: PlayTarget = { vibration: true, speaker: false, pc: false }
+const PC_ONLY: PlayTarget = { vibration: false, speaker: false, pc: true }
+const VIBRATION_PC: PlayTarget = { vibration: true, speaker: false, pc: true }
+const VIBRATION_SPEAKER: PlayTarget = { vibration: true, speaker: true, pc: false }
+const SPEAKER_ONLY: PlayTarget = { vibration: false, speaker: true, pc: false }
+/** ✕ vibration · ○ controller speaker + vibration · △ PC sound · □ PC sound + vibration */
+const BUTTON_TARGET: Record<(typeof FACE_BUTTONS)[number], PlayTarget> = {
+  cross: VIBRATION_ONLY,
+  circle: VIBRATION_SPEAKER,
+  triangle: PC_ONLY,
+  square: VIBRATION_PC,
+}
+/** What the on-screen Play button plays */
+const PLAY_CHOICES: { label: string; target: PlayTarget }[] = [
+  { label: 'PC Audio Only', target: PC_ONLY },
+  { label: 'Vibration Only', target: VIBRATION_ONLY },
+  { label: 'Vibration + PC Audio', target: VIBRATION_PC },
+  { label: 'Vibration + Controller Audio', target: VIBRATION_SPEAKER },
+  { label: 'Controller Audio Only', target: SPEAKER_ONLY },
+]
+const PLAY_CHOICE_KEY = 'dshd.workbench.playChoice'
+const NORMALIZE_KEY = 'dshd.workbench.normalize'
+
+/**
+ * Normalize Vibration: one gain for both motors (keeping their balance), measured before each
+ * motor's EQ Gain (dB), which then applies on top. The gain is the last stage of each motor's
+ * chain, so a motor's pre-gain peak is its output peak divided by that gain. 1 when silent.
+ */
+function normalizeGain(motors: Float32Array[], eqs: EqSettings[]): number {
+  let peak = 0
+  motors.forEach((c, k) => {
+    let p = 0
+    for (let i = 0; i < c.length; i++) p = Math.max(p, Math.abs(c[i]))
+    peak = Math.max(peak, p / Math.pow(10, (eqs[k]?.gainDb ?? 0) / 20))
+  })
+  return peak > 1e-6 ? 1 / peak : 1
+}
+const PC_SINK_KEY = 'dshd.workbench.pcSink'
 const AUDIO_FILTER = [{ name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'flac', 'm4a'] }]
 const LAST_FILE_KEY = 'dshd.workbench.file'
 const EQ_KEY = 'dshd.workbench.motorEqs'
@@ -58,6 +106,13 @@ interface PreviewGraph {
   srcAnalyser: AnalyserNode
   sources: EqSource[]
   startTime: number
+  /** per-motor gain: Vibration Power, or 0 when this playback has no vibration */
+  motorGains: GainNode[]
+  target: PlayTarget
+  /** extra nodes to disconnect: the controller-speaker path */
+  speakerNodes: AudioNode[]
+  /** the original sound on the PC output, once its context is ready */
+  pcSource: AudioBufferSourceNode | null
 }
 
 async function decodeAudioFile(name: string, bytes: Uint8Array, path?: string): Promise<LoadedAudio> {
@@ -92,7 +147,8 @@ export function WorkbenchPanel() {
   const [rendered, setRendered] = useState<Float32Array[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
-  const [playing, setPlaying] = useState(false)
+  /** what's playing now, or null */
+  const [playing, setPlaying] = useState<PlayTarget | null>(null)
   const [playhead, setPlayhead] = useState(0)
   const [mode, setMode] = useState<PlayMode>(() => loadLocal('dshd.workbench.mode', 'restart'))
   const [loop, setLoop] = useState(false)
@@ -100,8 +156,42 @@ export function WorkbenchPanel() {
   const [volume, setVolume] = useState(() => loadLocal('dshd.workbench.boost', 1))
   const [dragOver, setDragOver] = useState(false)
   const graph = useRef<PreviewGraph | null>(null)
-  const latest = useRef({ audio, eqs, mode, loop })
-  latest.current = { audio, eqs, mode, loop }
+  const [pcSink, setPcSink] = useState<string>(() => loadLocal(PC_SINK_KEY, ''))
+  const [playChoice, setPlayChoice] = useState<string>(() => {
+    const saved = loadLocal(PLAY_CHOICE_KEY, 'Vibration Only')
+    return PLAY_CHOICES.some((c) => c.label === saved) ? saved : 'Vibration Only'
+  })
+  const playTarget = PLAY_CHOICES.find((c) => c.label === playChoice)!.target
+  const [pcOutputs, setPcOutputs] = useState<OutputDevice[]>([])
+  // Normalize Vibration: the motors get the gain that brings their loudest point to full
+  // power (instead of Vibration Power)
+  const [normalize, setNormalize] = useState(() => loadLocal(NORMALIZE_KEY, false))
+  // rendered matches the latest EQs once its debounced render lands
+  const normGain = useMemo(() => (rendered ? normalizeGain(rendered, eqs) : 1), [rendered]) // eslint-disable-line react-hooks/exhaustive-deps
+  const motorGain = normalize ? normGain : volume
+  // Reset Motor Settings: EQs, power, normalize, play options back to defaults; unload the sound
+  useEffect(
+    () =>
+      onReset((s) => {
+        if (s !== 'motor') return
+        stopPreview()
+        setAudio(null)
+        setRendered(null)
+        setPlayhead(0)
+        setEqsState(defaultEqs(2))
+        setVolume(1)
+        setNormalize(false)
+        setLoop(false)
+        setMode('restart')
+        setPlayChoice('Vibration Only')
+        setError(null)
+        setMsg(null)
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  const latest = useRef({ audio, eqs, mode, loop, motorGain, pcSink })
+  latest.current = { audio, eqs, mode, loop, motorGain, pcSink }
 
   const setEqs = (next: EqSettings[]) => {
     setEqsState(next)
@@ -112,7 +202,7 @@ export function WorkbenchPanel() {
   const changeEq = (i: number, patch: Partial<EqSettings>) => setEqs(eqs.map((e, j) => (j === i ? { ...e, ...patch } : e)))
 
   // --- loading ------------------------------------------------------------------
-  const load = async (name: string, bytes: Uint8Array, path?: string) => {
+  const load = async (name: string, bytes: Uint8Array, path?: string, remember = true) => {
     setError(null)
     setMsg(null)
     try {
@@ -123,15 +213,25 @@ export function WorkbenchPanel() {
       if (!eqsFit(latest.current.eqs, a.channels.length) || (a.channels.length >= 4) !== latest.current.eqs.some((e) => e.source.startsWith('ch'))) {
         setEqs(defaultEqs(a.channels.length))
       }
+      // the newest sound wins on reload: a path to reopen, or (dropped / browser) the stored copy
       if (path) saveLocal(LAST_FILE_KEY, path)
+      else if (remember) saveLocal(LAST_FILE_KEY, null)
+      // keep a copy so it comes back after a reload (dropped files and the browser have no path)
+      if (remember) void saveLastSound(name, bytes)
     } catch (e) {
       setError(`Couldn't decode ${name}: ${e instanceof Error ? e.message : e}`)
     }
   }
 
   useEffect(() => {
+    // the desktop app reopens the last file from disk; otherwise use the stored copy
     const last = loadLocal<string | null>(LAST_FILE_KEY, null)
-    if (last) void platform.readFile(last).then((f) => f && load(f.name, f.data, f.path))
+    void (async () => {
+      const f = last ? await platform.readFile(last) : null
+      if (f) return load(f.name, f.data, f.path)
+      const saved = await loadLastSound()
+      if (saved) await load(saved.name, saved.data, undefined, false)
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -148,6 +248,7 @@ export function WorkbenchPanel() {
 
   // --- live preview through the 4 EQs -----------------------------------------------
   const bufferCache = useRef<{ audio: LoadedAudio; ctx: AudioContext; buffer: AudioBuffer } | null>(null)
+  const pcBufferCache = useRef<{ audio: LoadedAudio; ctx: AudioContext; buffer: AudioBuffer } | null>(null)
 
   function stopPreview() {
     const g = graph.current
@@ -162,12 +263,23 @@ export function WorkbenchPanel() {
       g.chains.forEach((c) => c.disconnect())
       g.trims.forEach((t) => t.disconnect())
       g.split.disconnect()
+      g.motorGains.forEach((m) => m.disconnect())
+      g.speakerNodes.forEach((n) => n.disconnect())
+      if (g.target.speaker) void dualSense.update({ audioOutput: 'headphones' })
+      if (g.pcSource) {
+        try {
+          g.pcSource.stop()
+        } catch {
+          /* not started */
+        }
+        g.pcSource.disconnect()
+      }
     }
-    setPlaying(false)
+    setPlaying(null)
   }
 
-  function startPreview() {
-    const { audio: a, eqs: e, loop: lp } = latest.current
+  function startPreview(target: PlayTarget = VIBRATION_ONLY) {
+    const { audio: a, eqs: e, loop: lp, motorGain: vol, pcSink: sink } = latest.current
     const ctx = hapticEngine.ctx
     if (!a || !ctx) return
     stopPreview()
@@ -176,13 +288,21 @@ export function WorkbenchPanel() {
       cache = { audio: a, ctx, buffer: audioBufferFrom(ctx, a.channels, SAMPLE_RATE) }
       bufferCache.current = cache
     }
+    // The haptic graph always runs (it drives the playhead and the EQ spectra); without
+    // vibration its motor gains are 0
     const analysers: AnalyserNode[] = []
+    const motorGains: GainNode[] = []
     const g = buildGraph(ctx, cache.buffer, e, (node, ch) => {
-      hapticEngine.connectToChannel(node, MOTOR_CHANNELS[ch])
+      const mg = ctx.createGain()
+      mg.gain.value = target.vibration ? vol : 0
+      node.connect(mg)
+      hapticEngine.connectToChannel(mg, MOTOR_CHANNELS[ch])
+      motorGains[ch] = mg
       const an = ctx.createAnalyser()
       an.fftSize = 4096
       an.smoothingTimeConstant = 0.75
-      node.connect(an)
+      // the spectrum shows what the motor gets: after Vibration Power / Normalize
+      mg.connect(an)
       analysers[ch] = an
     })
     const srcAnalyser = ctx.createAnalyser()
@@ -190,13 +310,58 @@ export function WorkbenchPanel() {
     srcAnalyser.smoothingTimeConstant = 0.75
     g.source.connect(srcAnalyser)
     g.source.loop = lp
-    const pg: PreviewGraph = { ctx, ...g, analysers, srcAnalyser, sources: e.map((x) => x.source), startTime: ctx.currentTime }
+    // ○: the original sound on the controller's built-in speaker. It's mono and plays only
+    // channel 2, so send a mono mix to channels 1 and 2, and switch the controller's audio
+    // from its headphone jack to the speaker while this plays
+    const speakerNodes: AudioNode[] = []
+    if (target.speaker) {
+      const mono = ctx.createGain()
+      mono.channelCount = 1
+      mono.channelCountMode = 'explicit'
+      mono.channelInterpretation = 'speakers'
+      g.source.connect(mono)
+      hapticEngine.connectToChannel(mono, 0)
+      hapticEngine.connectToChannel(mono, 1)
+      speakerNodes.push(mono)
+      void dualSense.update({ audioOutput: 'speaker' })
+    }
+    const pg: PreviewGraph = {
+      ctx,
+      ...g,
+      analysers,
+      srcAnalyser,
+      sources: e.map((x) => x.source),
+      startTime: ctx.currentTime,
+      motorGains,
+      target,
+      speakerNodes,
+      pcSource: null,
+    }
     g.source.onended = () => {
       if (graph.current === pg) stopPreview()
     }
     g.source.start()
     graph.current = pg
-    setPlaying(true)
+    setPlaying(target)
+    // △/□: the original sound on the PC output, started at the same point in the sound
+    if (target.pc) {
+      void pcContext(sink).then((pc) => {
+        if (graph.current !== pg) return
+        void pc.resume()
+        let pcb = pcBufferCache.current
+        if (!pcb || pcb.audio !== a || pcb.ctx !== pc) {
+          pcb = { audio: a, ctx: pc, buffer: audioBufferFrom(pc, a.channels, SAMPLE_RATE) }
+          pcBufferCache.current = pcb
+        }
+        const src = pc.createBufferSource()
+        src.buffer = pcb.buffer
+        src.loop = pg.source.loop
+        src.connect(pc.destination)
+        const elapsed = ctx.currentTime - pg.startTime
+        src.start(0, pg.source.loop ? elapsed % pcb.buffer.duration : elapsed)
+        pg.pcSource = src
+      })
+    }
   }
 
   // EQ edits apply live to the running preview
@@ -216,7 +381,10 @@ export function WorkbenchPanel() {
   }, [eqs])
 
   useEffect(() => {
-    if (graph.current) graph.current.source.loop = loop
+    const g = graph.current
+    if (!g) return
+    g.source.loop = loop
+    if (g.pcSource) g.pcSource.loop = loop
   }, [loop])
   const [vibrationMsg, setVibrationMsg] = useState<string | null>(null)
   const connectVibration = async () => {
@@ -229,9 +397,38 @@ export function WorkbenchPanel() {
   }
 
   useEffect(() => {
-    hapticEngine.setMasterGain(volume)
-    saveLocal('dshd.workbench.boost', volume)
-  }, [volume])
+    const g = graph.current
+    if (g && g.target.vibration) g.motorGains.forEach((m) => (m.gain.value = motorGain))
+  }, [motorGain])
+  useEffect(() => saveLocal('dshd.workbench.boost', volume), [volume])
+  useEffect(() => saveLocal(NORMALIZE_KEY, normalize), [normalize])
+
+  // PC sound output: open it ahead of time, and list the outputs other than the controller
+  useEffect(() => {
+    saveLocal(PC_SINK_KEY, pcSink)
+    void pcContext(pcSink)
+  }, [pcSink])
+  useEffect(() => {
+    const refresh = () => void HapticEngine.listOutputs().then((l) => setPcOutputs(l.filter((d) => !d.isDualSense))).catch(() => {})
+    refresh()
+    navigator.mediaDevices.addEventListener('devicechange', refresh)
+    const unsub = hapticEngine.onStatus(refresh) as unknown as () => void
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', refresh)
+      unsub()
+    }
+  }, [])
+  // Browsers keep a new AudioContext paused until a click or key press, and controller
+  // buttons don't count, so resume the PC context on the next real gesture
+  useEffect(() => {
+    const resume = () => void currentPcContext()?.resume()
+    window.addEventListener('pointerdown', resume)
+    window.addEventListener('keydown', resume)
+    return () => {
+      window.removeEventListener('pointerdown', resume)
+      window.removeEventListener('keydown', resume)
+    }
+  }, [])
   // engine restarts (output device change) invalidate the preview graph
   // Redraw when the audio output changes (the speakers/controller notice depends on it);
   // a preview playing on the old output's AudioContext has to stop
@@ -261,10 +458,10 @@ export function WorkbenchPanel() {
     const tick = () => {
       raf = requestAnimationFrame(tick)
       const b = dualSense.state.buttons
-      let pressed = false
-      for (const name of FACE_BUTTONS) if (presses.pressed(name, b[name])) pressed = true
+      let pressed: PlayTarget | null = null
+      for (const name of FACE_BUTTONS) if (presses.pressed(name, b[name])) pressed = BUTTON_TARGET[name]
       const anyHeld = FACE_BUTTONS.some((n) => b[n])
-      if (pressed) startPreview()
+      if (pressed) startPreview(pressed)
       if (latest.current.mode === 'hold' && held && !anyHeld) stopPreview()
       held = anyHeld
       const g = graph.current
@@ -319,7 +516,8 @@ export function WorkbenchPanel() {
   const exportWav = async (layout: 'quad' | 'stereo') => {
     if (!audio) return
     const motors = await renderMotors(audio.channels, SAMPLE_RATE, eqs)
-    for (const c of motors) for (let i = 0; i < c.length; i++) c[i] *= volume
+    const gain = normalize ? normalizeGain(motors, eqs) : volume
+    for (const c of motors) for (let i = 0; i < c.length; i++) c[i] *= gain
     let peak = 0
     for (const c of motors) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]))
     const quad = layout === 'quad'
@@ -357,6 +555,9 @@ export function WorkbenchPanel() {
         title="Sound → grip motors"
         right={
           <>
+            <button onClick={() => confirmReset(RESET_LABELS.motor) && void resetSection('motor')} title="Both motor EQs, Vibration Power, Normalize and play options back to defaults, and unload the sound">
+              {RESET_LABELS.motor}
+            </button>
             <button className="primary" onClick={() => void exportWav('quad')} disabled={!audio} title="Controller's native layout: ch 1/2 silent, motors on ch 3/4. Plays as-is on the controller's sound device.">
               Export 4-ch WAV…
             </button>
@@ -390,32 +591,84 @@ export function WorkbenchPanel() {
           </div>
           {error && <div className="errbox">{error}</div>}
           {audio ? (
-            <MotorWaveform channels={rendered} playhead={playhead} duration={audio.channels[0].length / SAMPLE_RATE} />
+            <MotorWaveform channels={rendered} gain={motorGain} playhead={playhead} duration={audio.channels[0].length / SAMPLE_RATE} />
           ) : (
             <div className="muted" style={{ border: '1px dashed var(--line)', borderRadius: 8, padding: 30, textAlign: 'center' }}>
               Drop a sound file here
             </div>
           )}
           <div className="row" style={{ marginTop: 10 }}>
-            <button className={playing ? 'active' : ''} disabled={!audio} onClick={() => (playing ? stopPreview() : startPreview())}>
-              {playing ? '■ Stop' : '▶ Play'}
+            <button
+              className={playing ? 'active' : ''}
+              disabled={!audio}
+              // from start: click plays (and stops while playing); when held: plays while the button is held down
+              onClick={mode === 'restart' ? () => (playing ? stopPreview() : startPreview(playTarget)) : undefined}
+              onPointerDown={
+                mode === 'hold'
+                  ? (e) => {
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                      startPreview(playTarget)
+                    }
+                  : undefined
+              }
+              onPointerUp={mode === 'hold' ? () => stopPreview() : undefined}
+              onPointerCancel={mode === 'hold' ? () => stopPreview() : undefined}
+            >
+              {playing && mode === 'restart' ? '■ Stop' : '▶ Play'}
             </button>
-            <span className="muted">Controller:</span>
+            <select
+              value={playChoice}
+              title="What the Play button plays"
+              onChange={(e) => {
+                setPlayChoice(e.target.value)
+                saveLocal(PLAY_CHOICE_KEY, e.target.value)
+              }}
+            >
+              {PLAY_CHOICES.map((c) => (
+                <option key={c.label} value={c.label}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
             <select
               value={mode}
+              title="Applies to the controller's face buttons and the Play button"
               onChange={(e) => {
                 setMode(e.target.value as PlayMode)
                 saveLocal('dshd.workbench.mode', e.target.value)
               }}
             >
-              <option value="restart">press ✕ ○ □ △ → play from start</option>
-              <option value="hold">hold ✕ ○ □ △ → play while held</option>
+              <option value="restart">Play From Start</option>
+              <option value="hold">Play When Held</option>
             </select>
+            <span className="muted">PC sound:</span>
+            <select value={pcSink} onChange={(e) => setPcSink(e.target.value)} title="Where PC audio plays the original sound">
+              <option value="">System default output</option>
+              {pcOutputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
             <label className="row">
               <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> Loop
             </label>
+            <label className="row" title="Raise the vibration so the loudest point of the sound becomes full vibration power">
+              <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} /> Normalize Vibration
+            </label>
             <div style={{ minWidth: 260, flex: 1 }}>
-              <Param label="Vibration Power" value={volume} min={0} max={2} step={0.05} onChange={setVolume} format={(v) => `${Math.round(v * 100)}%`} />
+              <Param
+                label="Vibration Power"
+                value={normalize ? Math.min(2, normGain) : volume}
+                min={0}
+                max={2}
+                step={0.05}
+                onChange={setVolume}
+                format={(v) => `${Math.round((normalize ? normGain : v) * 100)}%`}
+                disabled={normalize}
+              />
             </div>
           </div>
           {hapticEngine.channelCount < 4 && (
@@ -430,8 +683,15 @@ export function WorkbenchPanel() {
             </div>
           )}
           <p className="muted small" style={{ marginBottom: 0 }}>
-            {info ? 'Press any face button on the controller to play.' : 'Connect the controller to play from its face buttons (or press Space).'} Each grip motor has its
-            own EQ below; edits apply live while playing. Vibration Power also applies to exported WAVs.
+            {info ? (
+              <>
+                <b>✕</b> vibration · <b>○</b> controller speaker + vibration · <b>△</b> PC sound · <b>□</b> PC sound + vibration. The speaker and PC
+                play the original, unedited sound.
+              </>
+            ) : (
+              'Connect the controller to play from its face buttons (or press Space for vibration).'
+            )}{' '}
+            Each grip motor has its own EQ below; edits apply live while playing. Vibration Power applies to the motors and to exported WAVs.
           </p>
           {msg && <div className="muted small" style={{ marginTop: 6 }}>{msg}</div>}
         </div>
@@ -643,7 +903,8 @@ function EqCard(props: {
 
 // --- 4-lane waveform of the rendered output ----------------------------------------------
 
-function MotorWaveform({ channels, playhead, duration }: { channels: Float32Array[] | null; playhead: number; duration: number }) {
+/** The two motor signals as the motors get them (after Vibration Power / Normalize); clipped spots in yellow. */
+function MotorWaveform({ channels, gain, playhead, duration }: { channels: Float32Array[] | null; gain: number; playhead: number; duration: number }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const H = 2 * 60
   useEffect(() => {
@@ -658,7 +919,6 @@ function MotorWaveform({ channels, playhead, duration }: { channels: Float32Arra
     const lane = H / 2
     channels?.forEach((x, k) => {
       const y0 = k * lane
-      g.fillStyle = LANE_COLORS[k]
       const per = Math.max(1, Math.floor(x.length / W))
       for (let px = 0; px < W; px++) {
         let mn = 0
@@ -668,7 +928,10 @@ function MotorWaveform({ channels, playhead, duration }: { channels: Float32Arra
           if (x[i] < mn) mn = x[i]
           if (x[i] > mx) mx = x[i]
         }
+        mn *= gain
+        mx *= gain
         const h = lane / 2 - 3
+        g.fillStyle = mx > 1 || mn < -1 ? '#ffd84a' : LANE_COLORS[k]
         g.fillRect(px, y0 + lane / 2 - Math.min(1, mx) * h, 1, Math.max(1, (Math.min(1, mx) - Math.max(-1, mn)) * h))
       }
       g.fillStyle = '#8b91a1'
@@ -686,6 +949,6 @@ function MotorWaveform({ channels, playhead, duration }: { channels: Float32Arra
     }
     g.fillStyle = '#3ad6a8'
     g.fillRect((playhead / Math.max(1e-6, duration)) * W, 0, 2, H)
-  }, [channels, playhead, duration, H])
+  }, [channels, gain, playhead, duration, H])
   return <canvas ref={ref} className="wave" style={{ height: H }} />
 }

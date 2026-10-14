@@ -46,13 +46,27 @@ export const RIG_CONTROLS: RigControl[] = [
   'fnLeft', 'fnRight', 'paddleLeft', 'paddleRight', 'lightbar',
 ]
 
+/**
+ * Bring a saved rig up to date: L1/R1 used to press into the face (y) like the face buttons;
+ * they press down into the top edge (+z). Rigs the user changed by hand are left alone.
+ */
+export function migrateRig(r: RigMap): RigMap {
+  const entries = { ...r.entries }
+  for (const c of ['l1', 'r1'] as const) {
+    const e = entries[c]
+    if (e && e.motion === 'press' && e.axis === 'y' && !e.invert) entries[c] = { ...e, axis: 'z', invert: true }
+  }
+  return { ...r, entries }
+}
+
 export function defaultRig(): RigMap {
   const entries = {} as Record<RigControl, RigEntry>
   for (const c of RIG_CONTROLS) entries[c] = press()
   entries.l2 = { node: null, motion: 'hinge', axis: 'x', amount: -25 }
   entries.r2 = { node: null, motion: 'hinge', axis: 'x', amount: -25 }
-  entries.l1 = { node: null, motion: 'press', axis: 'y', amount: 0.08 }
-  entries.r1 = { node: null, motion: 'press', axis: 'y', amount: 0.08 }
+  // bumpers sit on the top edge and press down into it, toward the player (+z)
+  entries.l1 = { node: null, motion: 'press', axis: 'z', amount: 0.08, invert: true }
+  entries.r1 = { node: null, motion: 'press', axis: 'z', amount: 0.08, invert: true }
   entries.leftStick = { node: null, motion: 'tilt', axis: 'y', amount: 22 }
   entries.rightStick = { node: null, motion: 'tilt', axis: 'y', amount: 22 }
   entries.l3 = press(0.15)

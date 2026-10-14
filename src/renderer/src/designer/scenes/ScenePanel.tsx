@@ -9,6 +9,7 @@ import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
 import { encodeWav } from '../../export/wav'
 import { loadLocal, PressTracker, saveLocal, tracker, useConnection, virtualTilt } from '../../store'
 import { Card, downloadName, Param, Select } from '../../ui/controls'
+import { confirmReset, onReset, RESET_LABELS, resetSection } from '../../resets'
 import {
   defaultCritters,
   defaultLiquid,
@@ -44,6 +45,15 @@ export function ScenePanel() {
     setCfgState(c)
     saveLocal('dshd.scene', c)
   }
+  useEffect(
+    () =>
+      onReset((s) => {
+        if (s !== 'scene') return
+        setCfgState(SCENE_PRESETS[4].make())
+        setMsg(null)
+      }),
+    [],
+  )
 
   // Create the sim once; push config changes into it
   if (!simRef.current) {
@@ -198,6 +208,7 @@ export function ScenePanel() {
         </select>
         <button onClick={() => void importScene()}>Open…</button>
         <button onClick={() => void exportScene()}>Save…</button>
+        <button onClick={() => confirmReset(RESET_LABELS.scene) && void resetSection('scene')}>{RESET_LABELS.scene}</button>
       </div>
       {msg && <div className="muted small" style={{ marginBottom: 8 }}>{msg}</div>}
       {!info && (

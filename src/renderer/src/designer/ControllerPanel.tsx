@@ -1,11 +1,11 @@
 // Live input readout, IMU axis setup, model loading/rig mapping, lightbar and test signals.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { dualSense } from '../device/hid'
 import { BUTTON_NAMES } from '../device/inputReport'
 import { hapticEngine } from '../haptics/engine'
 import { impactGrain } from '../haptics/dsp'
-import { lightbar, saveLocal, tracker, useConnection, useTicker } from '../store'
+import { lightbar, loadLocal, saveLocal, tracker, useConnection, useTicker } from '../store'
 import { DEFAULT_AXIS_MAP, type AxisSel } from '../orientation/tracker'
 import { Card, Param } from '../ui/controls'
 import type { LoadedModel } from '../viewer/ControllerView'
@@ -142,10 +142,35 @@ function ImuCard() {
   )
 }
 
+/** Delay Vibration: one beat per count; the test plays on the count of 3 */
+const COUNT_BEAT_MS = 800
+
 function OutputsCard() {
   const [color, setColor] = useState(() => `#${lightbar.rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`)
   const [leds, setLeds] = useState(0b00100)
   const info = useConnection()
+
+  // Delay Vibration: count "blip, blip, BLEEP" on a light and play the test on the third,
+  // so there's time to pick up the controller after clicking
+  const [delay, setDelay] = useState(() => loadLocal('dshd.testDelay', false))
+  const [light, setLight] = useState<'off' | 'blip' | 'go'>('off')
+  const timers = useRef<number[]>([])
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), [])
+  const run = (test: () => void) => {
+    timers.current.forEach((t) => window.clearTimeout(t))
+    timers.current = []
+    if (!delay) return test()
+    const at = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms))
+    at(0, () => setLight('blip'))
+    at(150, () => setLight('off'))
+    at(COUNT_BEAT_MS, () => setLight('blip'))
+    at(COUNT_BEAT_MS + 150, () => setLight('off'))
+    at(2 * COUNT_BEAT_MS, () => {
+      setLight('go')
+      test()
+    })
+    at(2 * COUNT_BEAT_MS + 700, () => setLight('off'))
+  }
 
   const applyColor = (hex: string) => {
     setColor(hex)
@@ -186,17 +211,29 @@ function OutputsCard() {
       </div>
       <div className="row" style={{ marginTop: 10 }}>
         <span className="muted">Haptics test</span>
-        <button onClick={() => testSide(-1)}>Left tap</button>
-        <button onClick={() => testSide(1)}>Right tap</button>
-        <button onClick={sweep}>Sweep L→R</button>
-        <button onClick={() => tone(60)}>60 Hz</button>
-        <button onClick={() => tone(160)}>160 Hz</button>
-        <button onClick={() => tone(320)}>320 Hz</button>
+        <label className="row" title="Count down on the light (blip, blip, BLEEP) and vibrate on the third, so you have time to pick up the controller">
+          <input
+            type="checkbox"
+            checked={delay}
+            onChange={(e) => {
+              setDelay(e.target.checked)
+              saveLocal('dshd.testDelay', e.target.checked)
+            }}
+          />
+          Delay Vibration
+        </label>
+        <span className={`countdown ${light === 'off' ? '' : light}`} />
+        <button onClick={() => run(() => testSide(-1))}>Left tap</button>
+        <button onClick={() => run(() => testSide(1))}>Right tap</button>
+        <button onClick={() => run(sweep)}>Sweep L→R</button>
+        <button onClick={() => run(() => tone(60))}>60 Hz</button>
+        <button onClick={() => run(() => tone(160))}>160 Hz</button>
+        <button onClick={() => run(() => tone(320))}>320 Hz</button>
       </div>
       <div className="row" style={{ marginTop: 10 }}>
         <span className="muted">Legacy rumble</span>
-        <button disabled={!info} onClick={() => { void dualSense.send({ rumbleLeft: 200, rumbleRight: 0 }); setTimeout(() => void dualSense.send({ rumbleLeft: 0, rumbleRight: 0 }), 300) }}>Heavy</button>
-        <button disabled={!info} onClick={() => { void dualSense.send({ rumbleLeft: 0, rumbleRight: 200 }); setTimeout(() => void dualSense.send({ rumbleLeft: 0, rumbleRight: 0 }), 300) }}>Light</button>
+        <button disabled={!info} onClick={() => run(() => { void dualSense.send({ rumbleLeft: 200, rumbleRight: 0 }); setTimeout(() => void dualSense.send({ rumbleLeft: 0, rumbleRight: 0 }), 300) })}>Heavy</button>
+        <button disabled={!info} onClick={() => run(() => { void dualSense.send({ rumbleLeft: 0, rumbleRight: 200 }); setTimeout(() => void dualSense.send({ rumbleLeft: 0, rumbleRight: 0 }), 300) })}>Light</button>
       </div>
       <p className="muted small" style={{ marginBottom: 0 }}>
         Haptic tests go through the audio engine (USB: channels 3/4 of the controller's audio device). If you feel nothing over USB, choose the 🎮 DualSense device

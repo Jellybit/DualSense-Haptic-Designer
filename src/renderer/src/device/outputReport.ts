@@ -17,6 +17,7 @@ export const VF0_HAPTICS_SELECT = 0x02
 export const VF0_RIGHT_TRIGGER = 0x04
 export const VF0_LEFT_TRIGGER = 0x08
 export const VF0_SPEAKER_VOLUME = 0x20
+export const VF0_AUDIO_CONTROL = 0x80
 // valid_flag1
 export const VF1_MIC_MUTE_LED = 0x01
 export const VF1_POWER_SAVE = 0x02
@@ -24,6 +25,7 @@ export const VF1_LIGHTBAR = 0x04
 export const VF1_RELEASE_LEDS = 0x08
 export const VF1_PLAYER_LEDS = 0x10
 export const VF1_MOTOR_POWER = 0x40
+export const VF1_AUDIO_CONTROL2 = 0x80
 // valid_flag2
 export const VF2_LED_BRIGHTNESS = 0x01
 export const VF2_LIGHTBAR_SETUP = 0x02
@@ -40,6 +42,12 @@ export interface OutputState {
   micLed?: 0 | 1 | 2
   /** 0-7 reduction of trigger force (0 = full strength) */
   triggerPowerReduction?: number
+  /**
+   * Where the controller plays audio channels 1/2 (USB): its headphone jack (the default) or
+   * its built-in mono speaker, which plays the right channel only. Values follow the Linux
+   * hid-playstation audio patch (2025).
+   */
+  audioOutput?: 'headphones' | 'speaker'
 }
 
 /** Fill the 47-byte common block. */
@@ -69,6 +77,18 @@ export function buildCommon(state: OutputState): Uint8Array<ArrayBuffer> {
   if (state.triggerPowerReduction !== undefined) {
     vf1 |= VF1_MOTOR_POWER
     c[36] = state.triggerPowerReduction & 0x07
+  }
+  if (state.audioOutput) {
+    vf0 |= VF0_AUDIO_CONTROL
+    if (state.audioOutput === 'speaker') {
+      c[7] = 3 << 4 // output path: speaker only (right channel)
+      vf0 |= VF0_SPEAKER_VOLUME
+      c[5] = 0x64 // speaker volume 100% (accepted range ~0x3d-0x64)
+      vf1 |= VF1_AUDIO_CONTROL2
+      c[37] = 0x02 // speaker preamp gain ~30%
+    } else {
+      c[7] = 0 // output path: headphones, left + right
+    }
   }
   if (state.lightbar) {
     vf1 |= VF1_LIGHTBAR

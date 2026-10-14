@@ -8,12 +8,13 @@ export function Param(props: {
   step?: number
   onChange: (v: number) => void
   format?: (v: number) => string
+  disabled?: boolean
 }) {
-  const { label, value, min, max, step = 1, onChange, format } = props
+  const { label, value, min, max, step = 1, onChange, format, disabled } = props
   return (
-    <div className="param">
+    <div className="param" style={disabled ? { opacity: 0.45 } : undefined}>
       <label>{label}</label>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
       <span className="val">{format ? format(value) : value}</span>
     </div>
   )

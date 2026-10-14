@@ -73,6 +73,16 @@ describe('trigger effects', () => {
 })
 
 describe('output reports', () => {
+  it('switches the controller audio between headphone jack and speaker', () => {
+    const sp = buildCommon({ audioOutput: 'speaker' })
+    expect(sp[0] & 0xa0).toBe(0xa0) // audio control + speaker volume valid
+    expect(sp[1] & 0x80).toBe(0x80) // audio control 2 valid
+    expect([sp[5], sp[7], sp[37]]).toEqual([0x64, 0x30, 0x02])
+    const hp = buildCommon({ audioOutput: 'headphones' })
+    expect(hp[0]).toBe(0x80)
+    expect(hp[7]).toBe(0)
+  })
+
   it('places trigger blocks and flags in the common block', () => {
     const c = buildCommon({ rightTrigger: [0x21, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], leftTrigger: [0x26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lightbar: [1, 2, 3] })
     expect(c.length).toBe(47)

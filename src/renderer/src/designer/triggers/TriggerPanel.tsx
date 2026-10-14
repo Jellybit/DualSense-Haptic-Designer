@@ -23,6 +23,7 @@ import { loadLocal, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
 import { getCalibration, travelToZone, zonesFor, zoneToTravel } from '../../device/triggerCalibration'
 import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
+import { confirmReset, onReset, RESET_LABELS, resetSection } from '../../resets'
 
 type Side = 'L2' | 'R2'
 
@@ -35,6 +36,21 @@ export const triggerState: Record<Side, TriggerEffect> = {
 function currentZone(side: Side): number {
   const analog = side === 'L2' ? dualSense.state.l2 : dualSense.state.r2
   return Math.min(9, Math.floor(travelToZone(analog, zonesFor(getCalibration(), side))))
+}
+
+// Reset Trigger Settings: both triggers off, even when this panel isn't on screen
+onReset((s) => {
+  if (s !== 'trigger') return
+  triggerState.L2 = { type: 'off' }
+  triggerState.R2 = { type: 'off' }
+  void applyTrigger('L2', triggerState.L2)
+  void applyTrigger('R2', triggerState.R2)
+})
+
+/** Both triggers off on the controller (the saved effects are kept). */
+export function releaseTriggers() {
+  const off = encodeTrigger({ type: 'off' })
+  return dualSense.setTriggers(off, off)
 }
 
 export function applyTrigger(side: Side, e: TriggerEffect) {
@@ -53,6 +69,16 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const info = useConnection()
   const [effects, setEffects] = useState(triggerState)
   const [live, setLive] = useState(true)
+  useEffect(
+    () =>
+      onReset((s) => {
+        if (s !== 'trigger') return
+        setEffects({ ...triggerState })
+        setLive(true)
+        setMsg(null)
+      }),
+    [],
+  )
   const [msg, setMsg] = useState<string | null>(null)
   const [calibrating, setCalibrating] = useState(() => location.hash === '#calibrate')
   const calibration = useTriggerCalibration()
@@ -64,6 +90,10 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
     saveLocal(`dshd.trig.${side}`, e)
     setEffects({ ...triggerState })
   }
+
+  // The trigger effects only apply while this tab is open: release them when it closes
+  // (after any child cleanup, e.g. the calibration wizard restoring the effects)
+  useEffect(() => () => void window.setTimeout(() => void releaseTriggers(), 0), [])
 
   // Live-send whenever an effect changes
   useEffect(() => {
@@ -128,13 +158,8 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
         >
           Apply now
         </button>
-        <button
-          onClick={() => {
-            setEffect('L2', { type: 'off' })
-            setEffect('R2', { type: 'off' })
-          }}
-        >
-          Both off
+        <button title="Both triggers back to Off" onClick={() => confirmReset(RESET_LABELS.trigger) && void resetSection('trigger')}>
+          {RESET_LABELS.trigger}
         </button>
         <button onClick={() => setCalibrating((c) => !c)} title="Measure where the effect zones sit along the trigger's travel">
           Calibrate travel…

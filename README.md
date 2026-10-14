@@ -44,8 +44,8 @@ Limits compared with the desktop app:
 - The browser hides audio device names until you grant a permission, so the controller's
   audio output can't be found automatically. Click **Connect to Controller Vibration** in the
   Sound → Grip motors section and allow it (Chrome may ask for microphone access; nothing is recorded).
-- Saving uses a save dialog where the browser supports one, or else a normal download. The
-  app can't reopen the last sound or model on the next visit.
+- Saving uses a save dialog where the browser supports one, or else a normal download. The last
+  sound is kept by the app and comes back on the next visit; a model you load does not.
 - Bluetooth haptics streaming (report `0x32`) is untested in the browser.
 
 ## How it works

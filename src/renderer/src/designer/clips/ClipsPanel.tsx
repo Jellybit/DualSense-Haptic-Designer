@@ -7,9 +7,10 @@ import { hapticEngine } from '../../haptics/engine'
 import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
 import { decodeWav, encodeWav, hapticChannels, resample, type WavLayout } from '../../export/wav'
 import { encodeTrigger, EFFECT_LABELS } from '../../device/triggerEffects'
-import { loadLocal, saveLocal, useConnection } from '../../store'
+import { loadLocal, PressTracker, saveLocal, useConnection } from '../../store'
+import { dualSense } from '../../device/hid'
 import { Card, downloadName, Param, Select } from '../../ui/controls'
-import { applyTrigger, triggerState } from '../triggers/TriggerPanel'
+import { applyTrigger, releaseTriggers, triggerState } from '../triggers/TriggerPanel'
 import { CLIP_PRESETS, newProject, renderProject, uid, type Clip, type ClipSource, type HapticProject, type TriggerKey } from './model'
 
 const PX_PER_SEC_DEFAULT = 160
@@ -61,6 +62,32 @@ export function ClipsPanel() {
   }
 
   useEffect(() => hapticEngine.onEnded((id) => id === PLAY_ID && (setPlaying(false), (playStart.current = null))) as unknown as () => void, [])
+
+  // Leaving the composer stops the clip and releases any trigger keyframe effects
+  useEffect(
+    () => () => {
+      hapticEngine.stopPlayback(PLAY_ID)
+      void releaseTriggers()
+    },
+    [],
+  )
+
+  // Any face button plays the clip from the start (the composer has only a vibration track)
+  const playRef = useRef(play)
+  playRef.current = play
+  useEffect(() => {
+    const presses = new PressTracker()
+    let raf = 0
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      const b = dualSense.state.buttons
+      let pressed = false
+      for (const name of ['cross', 'circle', 'square', 'triangle'] as const) if (presses.pressed(name, b[name])) pressed = true
+      if (pressed) playRef.current(0)
+    }
+    tick()
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   // Re-render while playing → restart from the current position so edits are heard
   useEffect(() => {
@@ -274,7 +301,7 @@ export function ClipsPanel() {
       )}
       {!selected && !selectedKey && (
         <p className="muted small">
-          Click a clip to edit it. Drag clips to move (across tracks too), drag the right edge to resize. <kbd>Space</kbd> plays/stops, <kbd>Del</kbd> deletes. Pan −1 = left
+          Click a clip to edit it. Drag clips to move (across tracks too), drag the right edge to resize. <kbd>Space</kbd> plays/stops, any face button on the controller plays from the start, <kbd>Del</kbd> deletes. Pan −1 = left
           grip, +1 = right grip — sweeping pan across a clip makes the sensation travel through the controller.
         </p>
       )}

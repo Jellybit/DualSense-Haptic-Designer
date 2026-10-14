@@ -4,21 +4,22 @@ import { hapticEngine, HapticEngine, type OutputDevice } from './haptics/engine'
 import { btHaptics } from './haptics/btHaptics'
 import { lightbar, loadLocal, saveLocal, tracker, useConnection, useTicker } from './store'
 import { ControllerView, loadModelFromBytes, placeholderModel, type LoadedModel } from './viewer/ControllerView'
-import { autoMap, defaultRig, knownRigFor, rigFitsModel, type RigMap } from './viewer/rig'
+import { autoMap, defaultRig, knownRigFor, migrateRig, rigFitsModel, type RigMap } from './viewer/rig'
 import { ControllerPanel } from './designer/ControllerPanel'
 import { ClipsPanel } from './designer/clips/ClipsPanel'
 import { ScenePanel } from './designer/scenes/ScenePanel'
 import { WorkbenchPanel } from './designer/workbench/WorkbenchPanel'
 import { Meter } from './ui/controls'
 import { loadBundledModel, platform } from './platform'
+import { confirmReset, resetAll } from './resets'
 
 type Tab = 'workbench' | 'controller' | 'experiments'
 type Experiment = 'scenes' | 'clips'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'workbench', label: 'Haptics & Triggers' },
-  { id: 'controller', label: 'Controller & Model' },
   { id: 'experiments', label: 'Experiments' },
+  { id: 'controller', label: 'Controller & Model' },
 ]
 
 const MODEL_PATH_KEY = 'dshd.modelPath'
@@ -33,7 +34,7 @@ export function App() {
   const [experiment, setExperiment] = useState<Experiment>(() => loadLocal('dshd.experiment', 'scenes'))
   const info = useConnection()
   const [model, setModel] = useState<LoadedModel>(() => placeholderModel())
-  const [rig, setRigState] = useState<RigMap>(() => autoMap(loadLocal(RIG_KEY, defaultRig()), placeholderModel().nodeNames))
+  const [rig, setRigState] = useState<RigMap>(() => autoMap(migrateRig(loadLocal(RIG_KEY, defaultRig())), placeholderModel().nodeNames))
   const [modelError, setModelError] = useState<string | null>(null)
   const [connError, setConnError] = useState<string | null>(null)
 
@@ -62,7 +63,7 @@ export function App() {
       setModel(m)
       // keep the saved rig if it belongs to this model; else use a ready-made rig for
       // known models; else auto-map by node names
-      const saved = loadLocal(RIG_KEY, defaultRig())
+      const saved = migrateRig(loadLocal(RIG_KEY, defaultRig()))
       const known = knownRigFor(m.nodeNames)
       if (rigFitsModel(saved, m.nodeNames)) setRig(saved)
       else if (known) setRig(known.rig(m.root))
@@ -112,6 +113,12 @@ export function App() {
           ))}
         </div>
         <div className="spacer" />
+        <button
+          title="Reset the motor, trigger and scene settings (and unload the sound). Keeps calibration, the 3D model and audio devices."
+          onClick={() => confirmReset('Reset all settings') && void resetAll()}
+        >
+          Reset All
+        </button>
         <AudioControls />
         <span className="status">
           <span className={`dot ${info ? 'on' : ''}`} />
@@ -255,11 +262,6 @@ function AudioControls() {
     await hapticEngine.start(id)
   }
 
-  const routeLabel =
-    hapticEngine.routing === 'dualsense'
-      ? `haptics → ch 3/4 (${hapticEngine.channelCount}ch)`
-      : `monitor → ch 1/2 (${hapticEngine.channelCount}ch)`
-
   return (
     <span className="row">
       <span className={`dot ${hapticEngine.running ? (hapticEngine.routing === 'dualsense' ? 'on' : 'warn') : ''}`} />
@@ -272,13 +274,10 @@ function AudioControls() {
           </option>
         ))}
       </select>
-      <span className="muted small" title={hapticEngine.error ?? ''}>
-        {hapticEngine.error ? `audio error: ${hapticEngine.error}` : routeLabel}
-      </span>
-      {hapticEngine.channelCount >= 4 && (
-        <button className="small" onClick={() => hapticEngine.applyRouting(hapticEngine.routing === 'dualsense' ? 'monitor' : 'dualsense')}>
-          {hapticEngine.routing === 'dualsense' ? 'Listen on spk' : 'Haptics'}
-        </button>
+      {hapticEngine.error && (
+        <span className="muted small" title={hapticEngine.error}>
+          audio error: {hapticEngine.error}
+        </span>
       )}
       {info?.transport === 'bt' && (
         <button
