@@ -143,6 +143,11 @@ interface KnownRig {
   match: string[]
   /** `root`: the loaded (split + normalized) model, for rigs that locate parts by position */
   rig: (root: Object3D) => RigMap
+  /**
+   * Press controls the model shows fully pressed in: at rest they're drawn raised by their
+   * press depth, and a full press brings them back to the model's position.
+   */
+  raised?: RigControl[]
 }
 
 /** Smaller press depths for the small centre buttons. */
@@ -154,6 +159,8 @@ export const KNOWN_RIGS: KnownRig[] = [
     // meshes all named "defaultMaterial", so parts are found by position after splitting.
     name: 'Sketchfab Playstation 5 Dualsense (AHarmlessPotato)',
     match: ['DualSense', 'defaultMaterial'],
+    // its face buttons stand only ~1 mm above the shell, about where a full press ends
+    raised: ['cross', 'circle', 'square', 'triangle'],
     rig: (root) => {
       const r = defaultRig()
       r.modelRotation = [90, 0, -180]

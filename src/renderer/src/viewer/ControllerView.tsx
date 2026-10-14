@@ -16,7 +16,7 @@ import { dualSense } from '../device/hid'
 import { lightbar, tracker } from '../store'
 import { buildPlaceholder } from './placeholder'
 import { splitDisconnectedParts } from './splitParts'
-import { pickState, RIG_CONTROLS, type PivotMode, type RigControl, type RigEntry, type RigMap } from './rig'
+import { knownRigFor, pickState, RIG_CONTROLS, type PivotMode, type RigControl, type RigEntry, type RigMap } from './rig'
 
 export interface LoadedModel {
   root: THREE.Object3D
@@ -177,6 +177,7 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
     const offset = new THREE.Group() // user model-rotation fix-up
     holder.add(offset)
     offset.add(model.root)
+    const raised = new Set(knownRigFor(model.nodeNames)?.raised ?? [])
     scene.add(holder)
 
     // Finger positions on the touchpad (up to two touches). Depth-tested like any other
@@ -345,8 +346,10 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
         let moving = true
         if (e.motion === 'press') {
           const v = controlValue(control, s)
-          moving = v !== 0
-          const dir = AXES[e.axis].clone().multiplyScalar(-v * e.amount * sign)
+          // raised controls sit out by their press depth at rest and reach the model's position at full press
+          const up = raised.has(control)
+          moving = up || v !== 0
+          const dir = AXES[e.axis].clone().multiplyScalar(((up ? 1 : 0) - v) * e.amount * sign)
           tmpD.makeTranslation(dir.x, dir.y, dir.z)
         } else {
           const pivot = resolvePivot(e.pivot, e.motion, nr.box, nr.restLocal, parentToCtrl(node, tmpParent))
