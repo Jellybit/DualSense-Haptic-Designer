@@ -74,7 +74,7 @@ export type TriggerEffectType = TriggerEffect['type']
 /** The editor's first dropdown; each group's types form the second dropdown (Custom = the graph editor first). */
 export const EFFECT_GROUPS = [
   { id: 'off', label: 'Off', types: ['off'] },
-  { id: 'force', label: 'Force', types: ['forceCurve', 'weapon'] },
+  { id: 'force', label: 'Force', types: ['forceCurve', 'weapon', 'bow'] },
   { id: 'vibration', label: 'Vibration', types: ['vibrationCurve', 'galloping', 'machine'] },
   { id: 'raw', label: 'Raw bytes', types: ['raw'] },
 ] as const satisfies readonly { id: string; label: string; types: readonly TriggerEffectType[] }[]
@@ -213,16 +213,8 @@ export function pointsFromStrengths(strengths: number[]): CurvePoint[] {
   return out
 }
 
-/**
- * Convert retired effects to current ones: the older slider-style effects become curves,
- * and Bow (which feels identical to Weapon on the controller) becomes a Weapon.
- * Other effects are returned unchanged.
- */
+/** Convert the older slider-style effects to curves; other effects are returned unchanged. */
 export function toCurveEffect(e: TriggerEffect): TriggerEffect {
-  if (e.type === 'bow') {
-    const start = clamp(e.start, 2, 7)
-    return { type: 'weapon', start, end: clamp(e.end, start + 1, 8), strength: e.strength }
-  }
   if (!['feedback', 'slope', 'slopeDown', 'multiFeedback', 'vibration', 'multiVibration'].includes(e.type)) return e
   const b = encodeTrigger(e)
   if (b[0] === TriggerMode.Feedback) return { type: 'forceCurve', points: pointsFromStrengths(unpackZones(b).values) }

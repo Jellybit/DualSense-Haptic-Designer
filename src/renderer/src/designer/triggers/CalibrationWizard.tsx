@@ -85,8 +85,13 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
   const [msg, setMsg] = useState('')
   const run = useRef<Run | null>(null)
   const top = useRef<HTMLDivElement>(null)
-  useEffect(() => top.current?.scrollIntoView({ block: 'start' }), [])
-  useEffect(() => saveLocal(HOLDS_KEY, holds), [holds])
+  // braces: an effect must return nothing or a cleanup function (newer browsers' scrollIntoView returns a Promise)
+  useEffect(() => {
+    top.current?.scrollIntoView({ block: 'start' })
+  }, [])
+  useEffect(() => {
+    saveLocal(HOLDS_KEY, holds)
+  }, [holds])
 
   useEffect(
     () => () => {

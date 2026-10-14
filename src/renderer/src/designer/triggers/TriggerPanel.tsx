@@ -84,7 +84,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const calibration = useTriggerCalibration()
 
   const setEffect = (side: Side, effect: TriggerEffect) => {
-    // imports may hold retired effects (slider-style ones, Bow)
+    // imports may hold the older slider-style effects
     const e = toCurveEffect(effect)
     triggerState[side] = e
     saveLocal(`dshd.trig.${side}`, e)
@@ -254,6 +254,15 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
           <Param label="Start" value={e.start} min={2} max={7} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={(v) => zone(v + 1)} />
           <Param label="Break point" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
+        </>
+      )
+    case 'bow':
+      return (
+        <>
+          <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
+          <Param label="End" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
+          <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
+          <Param label="Snap force" value={e.snapForce} min={1} max={8} onChange={(v) => set('snapForce', v)} />
         </>
       )
     case 'galloping':

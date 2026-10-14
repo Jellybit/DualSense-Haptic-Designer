@@ -36,8 +36,7 @@ describe('trigger curves', () => {
       expect(encodeTrigger(c)).toEqual(encodeTrigger(old))
     }
     expect(toCurveEffect({ type: 'weapon', start: 3, end: 6, strength: 8 }).type).toBe('weapon')
-    // Bow feels identical to Weapon, so it loads as one
-    expect(toCurveEffect({ type: 'bow', start: 1, end: 6, strength: 6, snapForce: 8 })).toEqual({ type: 'weapon', start: 2, end: 6, strength: 6 })
+    expect(toCurveEffect({ type: 'bow', start: 1, end: 6, strength: 6, snapForce: 8 }).type).toBe('bow')
   })
 
   it('inverts the calibration mapping', () => {
