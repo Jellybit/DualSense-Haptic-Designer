@@ -11,6 +11,6 @@ export default defineConfig({
   plugins: [react()],
   worker: { format: 'es' },
   server: { host: 'localhost', port: 5174 },
-  preview: { host: 'localhost', port: 5174 },
+  preview: { host: 'localhost', port: 5174, strictPort: true },
   build: { outDir: resolve(__dirname, 'out/web'), emptyOutDir: true },
 })

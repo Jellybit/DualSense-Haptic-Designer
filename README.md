@@ -32,6 +32,9 @@ npm run web:build    # static build into out/web/
 npm run web:preview  # serve out/web/ at http://localhost:5174
 ```
 
+Or double-click `Run DualSense Haptic Designer (browser).bat`: it builds, serves and opens the
+page in Chrome (or Edge). Closing its window stops the server.
+
 Limits compared with the desktop app:
 
 - **Chrome or Edge only.** Firefox and Safari have no WebHID, so the controller can't connect.
