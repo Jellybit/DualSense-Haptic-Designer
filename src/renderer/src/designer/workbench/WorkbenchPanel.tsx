@@ -96,7 +96,7 @@ export function WorkbenchPanel() {
   const [playhead, setPlayhead] = useState(0)
   const [mode, setMode] = useState<PlayMode>(() => loadLocal('dshd.workbench.mode', 'restart'))
   const [loop, setLoop] = useState(false)
-  // Vibration Boost: gain on the motors, applied live and to exported WAVs
+  // Vibration Power: gain on the motors, applied live and to exported WAVs
   const [volume, setVolume] = useState(() => loadLocal('dshd.workbench.boost', 1))
   const [dragOver, setDragOver] = useState(false)
   const graph = useRef<PreviewGraph | null>(null)
@@ -328,7 +328,7 @@ export function WorkbenchPanel() {
     const path = await platform.saveFile(name, [{ name: 'WAV', extensions: ['wav'] }], data)
     if (!path) return
     const layoutText = quad ? '4-ch, 48 kHz, 16-bit: motors on ch 3/4, ch 1/2 silent' : '2-ch, 48 kHz, 16-bit: left motor, right motor'
-    setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower Vibration Boost or some EQ gain to avoid clipping` : ''}`)
+    setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower Vibration Power or some EQ gain to avoid clipping` : ''}`)
   }
 
   const exportJson = async () => {
@@ -415,7 +415,7 @@ export function WorkbenchPanel() {
               <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> Loop
             </label>
             <div style={{ minWidth: 260, flex: 1 }}>
-              <Param label="Vibration Boost" value={volume} min={0} max={2} step={0.05} onChange={setVolume} format={(v) => `${Math.round(v * 100)}%`} />
+              <Param label="Vibration Power" value={volume} min={0} max={2} step={0.05} onChange={setVolume} format={(v) => `${Math.round(v * 100)}%`} />
             </div>
           </div>
           {hapticEngine.channelCount < 4 && (
@@ -431,7 +431,7 @@ export function WorkbenchPanel() {
           )}
           <p className="muted small" style={{ marginBottom: 0 }}>
             {info ? 'Press any face button on the controller to play.' : 'Connect the controller to play from its face buttons (or press Space).'} Each grip motor has its
-            own EQ below; edits apply live while playing. Vibration Boost also applies to exported WAVs.
+            own EQ below; edits apply live while playing. Vibration Power also applies to exported WAVs.
           </p>
           {msg && <div className="muted small" style={{ marginTop: 6 }}>{msg}</div>}
         </div>
