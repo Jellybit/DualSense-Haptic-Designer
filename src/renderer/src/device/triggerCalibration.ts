@@ -74,6 +74,16 @@ export function zoneToTravel(z: number, zones: number[] = DEFAULT_ZONES): number
   return pts[i] + (pts[i + 1] - pts[i]) * (c - i)
 }
 
+/** Inverse of zoneToTravel: the fractional zone coordinate 0..10 at analog travel t (0..1). */
+export function travelToZone(t: number, zones: number[] = DEFAULT_ZONES): number {
+  const pts = [...zones, 1]
+  if (t <= pts[0]) return 0
+  for (let i = 0; i < 10; i++) {
+    if (t <= pts[i + 1]) return pts[i + 1] > pts[i] ? i + (t - pts[i]) / (pts[i + 1] - pts[i]) : i
+  }
+  return 10
+}
+
 // --- shared store ------------------------------------------------------------
 
 const KEY = 'dshd.triggerCalibration'

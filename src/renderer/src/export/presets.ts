@@ -13,7 +13,7 @@
 // (USB report 0x02 offsets 11..21 for R2 / 22..32 for L2 counting the report ID).
 // Games only need `raw`; `effect` lets the designer re-open the preset for editing.
 
-import { decodeTrigger, encodeTrigger, type TriggerEffect } from '../device/triggerEffects'
+import { decodeTrigger, encodeTrigger, toCurveEffect, type TriggerEffect } from '../device/triggerEffects'
 
 export interface TriggerPreset {
   name: string
@@ -28,8 +28,10 @@ export interface PresetFile {
   presets: TriggerPreset[]
 }
 
+/** Older slider-style effects are stored as curves. */
 export function makePreset(name: string, trigger: TriggerPreset['trigger'], effect: TriggerEffect): TriggerPreset {
-  return { name, trigger, effect, raw: encodeTrigger(effect) }
+  const e = toCurveEffect(effect)
+  return { name, trigger, effect: e, raw: encodeTrigger(e) }
 }
 
 export function serializePresets(presets: TriggerPreset[]): string {

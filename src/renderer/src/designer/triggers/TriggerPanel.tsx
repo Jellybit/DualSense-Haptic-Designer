@@ -8,21 +8,24 @@ import {
   defaultEffect,
   effectProfile,
   EFFECT_LABELS,
+  EFFECT_MENU,
   encodeTrigger,
+  toCurveEffect,
+  type CurvePoint,
   type TriggerEffect,
   type TriggerEffectType,
 } from '../../device/triggerEffects'
 import { BUILTIN_PRESETS, makePreset, parsePresets, serializePresets, type TriggerPreset } from '../../export/presets'
 import { loadLocal, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
-import { zonesFor, zoneToTravel } from '../../device/triggerCalibration'
+import { travelToZone, zonesFor, zoneToTravel } from '../../device/triggerCalibration'
 import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
 
 type Side = 'L2' | 'R2'
 
 export const triggerState: Record<Side, TriggerEffect> = {
-  L2: loadLocal<TriggerEffect>('dshd.trig.L2', { type: 'off' }),
-  R2: loadLocal<TriggerEffect>('dshd.trig.R2', { type: 'off' }),
+  L2: toCurveEffect(loadLocal<TriggerEffect>('dshd.trig.L2', { type: 'off' })),
+  R2: toCurveEffect(loadLocal<TriggerEffect>('dshd.trig.R2', { type: 'off' })),
 }
 
 export function applyTrigger(side: Side, e: TriggerEffect) {
@@ -46,7 +49,9 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   const [calibrating, setCalibrating] = useState(() => location.hash === '#calibrate')
   const calibration = useTriggerCalibration()
 
-  const setEffect = (side: Side, e: TriggerEffect) => {
+  const setEffect = (side: Side, effect: TriggerEffect) => {
+    // presets and imports may hold the older slider-style effects
+    const e = toCurveEffect(effect)
     triggerState[side] = e
     saveLocal(`dshd.trig.${side}`, e)
     setEffects({ ...triggerState })
@@ -176,7 +181,7 @@ function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: 
       <div className="param">
         <label>Effect</label>
         <select value={effect.type} onChange={(e) => onChange(defaultEffect(e.target.value as TriggerEffectType))}>
-          {(Object.keys(EFFECT_LABELS) as TriggerEffectType[]).map((t) => (
+          {EFFECT_MENU.map((t) => (
             <option key={t} value={t}>
               {EFFECT_LABELS[t]}
             </option>
@@ -185,7 +190,7 @@ function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: 
         <span />
       </div>
       <EffectParams effect={effect} zones={zones} set={set} onChange={onChange} />
-      <ProfileGraph effect={effect} side={side} zones={zones} />
+      <ProfileGraph effect={effect} side={side} zones={zones} onPoints={(points) => set('points', points)} />
       <div className="mono small muted" style={{ marginTop: 6 }}>
         bytes [{bytes.map((b) => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]
       </div>
@@ -206,17 +211,22 @@ function TriggerEditor({ side, effect, zones, onChange, onSavePreset }: { side: 
   )
 }
 
+const isCurve = (e: TriggerEffect): e is Extract<TriggerEffect, { type: 'forceCurve' | 'vibrationCurve' }> =>
+  e.type === 'forceCurve' || e.type === 'vibrationCurve'
+
 function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffect; zones: number[]; set: (k: string, v: unknown) => void; onChange: (e: TriggerEffect) => void }) {
   // zone start as a percentage of the trigger reading (calibrated, or the z×10% guess)
   const zone = (v: number) => `${Math.round(zoneToTravel(v, zones) * 100)}%`
   switch (e.type) {
     case 'off':
       return <p className="muted small">Trigger moves freely.</p>
-    case 'feedback':
+    case 'forceCurve':
+      return <p className="muted small">Draw the resistance along the trigger's travel. The blue blocks are what each zone gets (strength 0–8).</p>
+    case 'vibrationCurve':
       return (
         <>
-          <Param label="Start position" value={e.position} min={0} max={9} onChange={(v) => set('position', v)} format={zone} />
-          <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
+          <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
+          <p className="muted small">Draw the vibration strength along the trigger's travel. One frequency applies to the whole trigger.</p>
         </>
       )
     case 'weapon':
@@ -225,42 +235,6 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
           <Param label="Start" value={e.start} min={2} max={7} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={(v) => zone(v + 1)} />
           <Param label="Break point" value={e.end} min={e.start + 1} max={8} onChange={(v) => set('end', v)} format={(v) => zone(v + 1)} />
           <Param label="Strength" value={e.strength} min={1} max={8} onChange={(v) => set('strength', v)} />
-        </>
-      )
-    case 'vibration':
-      return (
-        <>
-          <Param label="Start position" value={e.position} min={0} max={9} onChange={(v) => set('position', v)} format={zone} />
-          <Param label="Amplitude" value={e.amplitude} min={1} max={8} onChange={(v) => set('amplitude', v)} />
-          <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
-        </>
-      )
-    case 'slope':
-    case 'slopeDown': {
-      // upward keeps end strength ≥ start strength, downward keeps it ≤
-      const up = e.type === 'slope'
-      return (
-        <>
-          <Param label="Start" value={e.start} min={0} max={8} onChange={(v) => onChange({ ...e, start: v, end: Math.max(e.end, v + 1) })} format={zone} />
-          <Param label="End" value={e.end} min={e.start + 1} max={9} onChange={(v) => set('end', v)} format={zone} />
-          <Param
-            label="Start strength"
-            value={e.startStrength}
-            min={1}
-            max={8}
-            onChange={(v) => onChange({ ...e, startStrength: v, endStrength: up ? Math.max(e.endStrength, v) : Math.min(e.endStrength, v) })}
-          />
-          <Param label="End strength" value={e.endStrength} min={up ? e.startStrength : 1} max={up ? 8 : e.startStrength} onChange={(v) => set('endStrength', v)} />
-        </>
-      )
-    }
-    case 'multiFeedback':
-      return <ZoneEditor values={e.strengths} zones={zones} onChange={(v) => set('strengths', v)} label="force" />
-    case 'multiVibration':
-      return (
-        <>
-          <Param label="Frequency (Hz)" value={e.frequency} min={1} max={255} onChange={(v) => set('frequency', v)} />
-          <ZoneEditor values={e.amplitudes} zones={zones} onChange={(v) => set('amplitudes', v)} label="amp" />
         </>
       )
     case 'bow':
@@ -314,44 +288,41 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
           <span className="muted small">byte 0 = mode (0x05 off, 0x21 feedback, 0x25 weapon, 0x26 vibration …)</span>
         </div>
       )
+    default:
+      return null
   }
 }
 
-function ZoneEditor({ values, zones, onChange, label }: { values: number[]; zones: number[]; onChange: (v: number[]) => void; label: string }) {
-  return (
-    <div className="zones" style={{ margin: '8px 0' }}>
-      {values.map((v, i) => (
-        <div className="z" key={i}>
-          <input
-            type="range"
-            min={0}
-            max={8}
-            value={v}
-            style={{ writingMode: 'vertical-lr', direction: 'rtl', height: 80 }}
-            onChange={(e) => {
-              const next = [...values]
-              next[i] = Number(e.target.value)
-              onChange(next)
-            }}
-          />
-          <span>{v}</span>
-          <span>{Math.round(zones[i] * 100)}%</span>
-        </div>
-      ))}
-      <div className="small muted" style={{ gridColumn: '1 / -1' }}>
-        {label} per zone (0 = none)
-      </div>
-    </div>
-  )
-}
-
-/** Force/vibration vs trigger travel, with the live trigger position overlaid. */
-function ProfileGraph({ effect, side, zones }: { effect: TriggerEffect; side: Side; zones: number[] }) {
+/** Force/vibration vs trigger travel, with the live trigger position overlaid. Curve effects are edited here. */
+function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect; side: Side; zones: number[]; onPoints?: (p: CurvePoint[]) => void }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const effRef = useRef(effect)
   effRef.current = effect
   const zonesRef = useRef(zones)
   zonesRef.current = zones
+  const editable = !!onPoints && isCurve(effect)
+  const H = editable ? 180 : 120
+  const [selected, setSelected] = useState<number | null>(null)
+  const selRef = useRef(selected)
+  selRef.current = selected
+  const drag = useRef<number | null>(null)
+  const points = isCurve(effect) ? effect.points : []
+  // a new effect (or a preset) may have fewer points
+  if (selected !== null && selected >= points.length) setSelected(null)
+
+  // canvas geometry shared by drawing and pointer handling
+  const PAD = 8
+  const geo = () => {
+    const W = ref.current?.clientWidth ?? 0
+    return {
+      W,
+      // zone coordinate (0-10) <-> pixel x through the calibration; strength (0-8) <-> pixel y
+      px: (z: number) => PAD + (W - 2 * PAD) * zoneToTravel(z, zonesRef.current),
+      py: (y: number) => H - PAD - (y / 8) * (H - 2 * PAD),
+      zoneAt: (x: number) => travelToZone(Math.min(1, Math.max(0, (x - PAD) / (W - 2 * PAD))), zonesRef.current),
+      strengthAt: (y: number) => Math.min(8, Math.max(0, ((H - PAD - y) / (H - 2 * PAD)) * 8)),
+    }
+  }
 
   useEffect(() => {
     let raf = 0
@@ -360,33 +331,32 @@ function ProfileGraph({ effect, side, zones }: { effect: TriggerEffect; side: Si
       const c = ref.current
       if (!c) return
       const dpr = window.devicePixelRatio || 1
-      const W = c.clientWidth
-      const H = 120
-      if (c.width !== W * dpr) {
+      const { W, px, py } = geo()
+      if (c.width !== W * dpr || c.height !== H * dpr) {
         c.width = W * dpr
         c.height = H * dpr
       }
       const g = c.getContext('2d')!
       g.setTransform(dpr, 0, 0, dpr, 0, 0)
       g.clearRect(0, 0, W, H)
-      const pad = 6
-      const { force, vibration } = effectProfile(effRef.current, 200)
+      const eff = effRef.current
+      const { force, vibration } = effectProfile(eff, 200)
       // x is the analog trigger reading; zone coordinates map through the calibration
-      const xOf = (t: number) => pad + (W - 2 * pad) * zoneToTravel(t * 10, zonesRef.current)
+      const xOf = (t: number) => px(t * 10)
       // zones grid
       g.strokeStyle = '#262a35'
       for (let i = 0; i <= 10; i++) {
         const x = xOf(i / 10)
         g.beginPath()
-        g.moveTo(x, pad)
-        g.lineTo(x, H - pad)
+        g.moveTo(x, PAD)
+        g.lineTo(x, H - PAD)
         g.stroke()
       }
       const plot = (arr: number[], color: string, fill: string) => {
         g.beginPath()
-        g.moveTo(pad, H - pad)
-        arr.forEach((v, i) => g.lineTo(xOf(i / (arr.length - 1)), H - pad - v * (H - 2 * pad)))
-        g.lineTo(W - pad, H - pad)
+        g.moveTo(PAD, H - PAD)
+        arr.forEach((v, i) => g.lineTo(xOf(i / (arr.length - 1)), H - PAD - v * (H - 2 * PAD)))
+        g.lineTo(W - PAD, H - PAD)
         g.closePath()
         g.fillStyle = fill
         g.fill()
@@ -395,37 +365,149 @@ function ProfileGraph({ effect, side, zones }: { effect: TriggerEffect; side: Si
       }
       plot(force, '#7aa2ff', 'rgba(77,124,255,0.25)')
       if (vibration.some((v) => v > 0)) {
-        // draw vibration as a zig-zag band
+        // vibration as a zig-zag band whose height is the vibration strength
         g.strokeStyle = '#ffb347'
         g.beginPath()
         vibration.forEach((v, i) => {
           const x = xOf(i / (vibration.length - 1))
-          const y = H - pad - v * (H - 2 * pad) * (i % 2 ? 1 : 0.6)
+          const y = H - PAD - v * (H - 2 * PAD) * (i % 2 ? 1 : 0.6)
           if (i === 0) g.moveTo(x, y)
           else g.lineTo(x, y)
         })
         g.stroke()
       }
+      // the drawn curve and its points (the blocks/band above are what the trigger gets)
+      if (isCurve(eff) && eff.points.length) {
+        const pts = eff.points
+        g.strokeStyle = 'rgba(255,255,255,0.85)'
+        g.lineWidth = 1.5
+        g.beginPath()
+        g.moveTo(px(0), py(pts[0].y))
+        for (const p of pts) g.lineTo(px(p.x), py(p.y))
+        g.lineTo(px(10), py(pts[pts.length - 1].y))
+        g.stroke()
+        pts.forEach((p, i) => {
+          const sel = i === selRef.current
+          g.beginPath()
+          g.arc(px(p.x), py(p.y), sel ? 6 : 4.5, 0, Math.PI * 2)
+          g.fillStyle = sel ? '#ffffff' : '#1b1e27'
+          g.fill()
+          g.strokeStyle = sel ? '#7aa2ff' : '#ffffff'
+          g.lineWidth = 2
+          g.stroke()
+        })
+        g.lineWidth = 1
+      }
       // live trigger position
       const pos = side === 'L2' ? dualSense.state.l2 : dualSense.state.r2
       if (dualSense.connected) {
-        const x = pad + (W - 2 * pad) * pos
+        const x = PAD + (W - 2 * PAD) * pos
         g.strokeStyle = '#3ad6a8'
         g.lineWidth = 2
         g.beginPath()
-        g.moveTo(x, pad)
-        g.lineTo(x, H - pad)
+        g.moveTo(x, PAD)
+        g.lineTo(x, H - PAD)
         g.stroke()
         g.lineWidth = 1
       }
       g.fillStyle = '#8b91a1'
       g.font = '10px Segoe UI'
-      g.fillText('rest', pad + 2, H - pad - 2)
-      g.fillText('full pull', W - pad - 42, H - pad - 2)
+      g.fillText('rest', PAD + 2, H - PAD - 2)
+      g.fillText('full pull', W - PAD - 42, H - PAD - 2)
     }
     draw()
     return () => cancelAnimationFrame(raf)
-  }, [side])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [side, H])
 
-  return <canvas ref={ref} className="graph" style={{ height: 120, marginTop: 8 }} />
+  const local = (e: React.PointerEvent) => {
+    const r = ref.current!.getBoundingClientRect()
+    return { x: e.clientX - r.left, y: e.clientY - r.top }
+  }
+  const setPoints = (pts: CurvePoint[]) => onPoints?.(pts)
+
+  const onDown = (e: React.PointerEvent) => {
+    if (!editable || e.button !== 0) return
+    const { x, y } = local(e)
+    const { px, py, zoneAt, strengthAt } = geo()
+    // grab the nearest point within reach, else add one here
+    let hit = -1
+    let best = 10
+    points.forEach((p, i) => {
+      const d = Math.hypot(px(p.x) - x, py(p.y) - y)
+      if (d <= best) {
+        best = d
+        hit = i
+      }
+    })
+    if (hit < 0) {
+      const z = zoneAt(x)
+      hit = points.findIndex((p) => p.x > z)
+      if (hit < 0) hit = points.length
+      setPoints([...points.slice(0, hit), { x: z, y: strengthAt(y) }, ...points.slice(hit)])
+    }
+    setSelected(hit)
+    drag.current = hit
+    ref.current!.setPointerCapture(e.pointerId)
+    ref.current!.focus()
+  }
+
+  const onMove = (e: React.PointerEvent) => {
+    const i = drag.current
+    const eff = effRef.current
+    if (i === null || !isCurve(eff)) return
+    const { x, y } = local(e)
+    const { zoneAt, strengthAt } = geo()
+    const pts = eff.points
+    // a point can't pass its neighbours
+    const lo = i > 0 ? pts[i - 1].x : 0
+    const hi = i < pts.length - 1 ? pts[i + 1].x : 10
+    const next = [...pts]
+    next[i] = { x: Math.min(hi, Math.max(lo, zoneAt(x))), y: strengthAt(y) }
+    setPoints(next)
+  }
+
+  const deleteSelected = () => {
+    if (selected === null) return
+    setPoints(points.filter((_, i) => i !== selected))
+    setSelected(null)
+  }
+
+  const sel = selected !== null ? points[selected] : null
+  return (
+    <>
+      <canvas
+        ref={ref}
+        className="graph"
+        tabIndex={editable ? 0 : undefined}
+        style={{ height: H, marginTop: 8, cursor: editable ? 'crosshair' : undefined, touchAction: 'none', outline: 'none' }}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
+        onKeyDown={(e) => {
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault()
+            deleteSelected()
+          } else if (e.key === 'Escape') setSelected(null)
+        }}
+      />
+      {editable && (
+        <div className="row small" style={{ marginTop: 4, minHeight: 26 }}>
+          {sel ? (
+            <>
+              <span className="mono">
+                point at {Math.round(zoneToTravel(sel.x, zones) * 100)}% travel, strength {sel.y.toFixed(1)}
+              </span>
+              <button className="small danger" onClick={deleteSelected}>
+                Delete point
+              </button>
+            </>
+          ) : (
+            <span className="muted">Click to add a point · drag a point to move it · click a point, then Delete to remove it</span>
+          )}
+        </div>
+      )}
+    </>
+  )
 }
