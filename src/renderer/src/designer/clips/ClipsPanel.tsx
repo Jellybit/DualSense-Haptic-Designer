@@ -308,7 +308,9 @@ export function ClipsPanel() {
       <Waveform L={rendered.L} R={rendered.R} playhead={playhead} duration={project.duration} />
 
       <div className="row" style={{ margin: '10px 0' }}>
-        <button className="primary" onClick={() => void exportWav()}>Export Haptics WAV (stereo L/R)</button>
+        <button className="primary" onClick={() => void exportWav()} title="Left and right actuators. A haptic signal for the grip motors, meant to be felt, not heard.">
+          Export Haptics WAV (stereo L/R)
+        </button>
         {msg && <span className="muted small">{msg}</span>}
       </div>
 

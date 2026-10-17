@@ -668,7 +668,7 @@ export function WorkbenchPanel() {
             <button className="primary" onClick={() => void exportWav('quad')} disabled={!audio} title="Controller's native layout: ch 1/2 silent, motors on ch 3/4. Plays as-is on the controller's sound device.">
               Export 4-ch WAV…
             </button>
-            <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. For engines/middleware that route haptics themselves.">
+            <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. A haptic signal for the grip motors, meant to be felt, not heard. For engines/middleware that route haptics themselves.">
               Export Haptics-only WAV…
             </button>
             <button className="primary" onClick={() => void exportJson()}>
