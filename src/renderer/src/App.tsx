@@ -9,6 +9,7 @@ import { ControllerPanel } from './designer/ControllerPanel'
 import { ClipsPanel } from './designer/clips/ClipsPanel'
 import { ScenePanel } from './designer/scenes/ScenePanel'
 import { WorkbenchPanel } from './designer/workbench/WorkbenchPanel'
+import { MiniGraphs } from './designer/workbench/MiniGraphs'
 import { Meter } from './ui/controls'
 import { loadBundledModel, platform } from './platform'
 import { confirmReset, resetAll } from './resets'
@@ -32,6 +33,23 @@ export function App() {
     return TABS.some((x) => x.id === t) ? (t as Tab) : 'workbench'
   })
   const [experiment, setExperiment] = useState<Experiment>(() => loadLocal('dshd.experiment', 'scenes'))
+  // width of the 3D view panel, set by dragging its left edge
+  const [sideW, setSideW] = useState(() => loadLocal(SIDE_W_KEY, SIDE_W_DEFAULT))
+  const dragSide = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const handle = e.currentTarget
+    handle.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) => setSideW(clampSide(window.innerWidth - ev.clientX))
+    const up = (ev: PointerEvent) => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+      saveLocal(SIDE_W_KEY, clampSide(window.innerWidth - ev.clientX))
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
   const info = useConnection()
   const [model, setModel] = useState<LoadedModel>(() => placeholderModel())
   const [rig, setRigState] = useState<RigMap>(() => autoMap(migrateRig(loadLocal(RIG_KEY, defaultRig())), placeholderModel().nodeNames))
@@ -132,7 +150,7 @@ export function App() {
           </button>
         )}
       </div>
-      <div className="main">
+      <div className="main" style={{ gridTemplateColumns: `minmax(0, 1fr) ${clampSide(sideW)}px` }}>
         <div className="workspace">
           {connError && <div className="errbox">{connError}</div>}
           {tab === 'workbench' && <WorkbenchPanel />}
@@ -163,12 +181,29 @@ export function App() {
           )}
         </div>
         <div className="sidepanel">
+          <div
+            className="side-splitter"
+            onPointerDown={dragSide}
+            onDoubleClick={() => {
+              setSideW(SIDE_W_DEFAULT)
+              saveLocal(SIDE_W_KEY, SIDE_W_DEFAULT)
+            }}
+            title="Drag to resize the 3D view · double-click to reset"
+          />
+          {tab === 'workbench' && <MiniGraphs />}
           <ControllerView model={model} rig={rig} />
           <SideInfo />
         </div>
       </div>
     </div>
   )
+}
+
+const SIDE_W_KEY = 'dshd.sideWidth'
+const SIDE_W_DEFAULT = 420
+/** keep the 3D view at least 260 px and leave the tab content at least 480 px */
+function clampSide(w: number) {
+  return Math.round(Math.max(260, Math.min(w, window.innerWidth - 480)))
 }
 
 function SideInfo() {

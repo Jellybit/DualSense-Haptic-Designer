@@ -25,7 +25,7 @@ import { getCalibration, travelToZone, zonesFor, zoneToTravel } from '../../devi
 import { CalibrationWizard, useTriggerCalibration } from './CalibrationWizard'
 import { confirmReset, onReset, RESET_LABELS, resetSection } from '../../resets'
 
-type Side = 'L2' | 'R2'
+export type Side = 'L2' | 'R2'
 
 export const triggerState: Record<Side, TriggerEffect> = {
   L2: toCurveEffect(loadLocal<TriggerEffect>('dshd.trig.L2', { type: 'off' })),
@@ -312,6 +312,115 @@ function EffectParams({ effect: e, zones, set, onChange }: { effect: TriggerEffe
   }
 }
 
+/**
+ * Draw a trigger's force/vibration profile against its travel, with the live trigger position.
+ * `mini`: the simplified copy above the 3D view (no text, no point handles).
+ */
+export function drawTriggerProfile(c: HTMLCanvasElement, H: number, eff: TriggerEffect, side: Side, zones: number[], opts: { mini?: boolean; selected?: number | null } = {}) {
+  const mini = !!opts.mini
+  const PAD = mini ? 3 : 8
+  const dpr = window.devicePixelRatio || 1
+  const W = c.clientWidth
+  if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
+    c.width = Math.round(W * dpr)
+    c.height = Math.round(H * dpr)
+  }
+  // zone coordinate (0-10) -> pixel x through the calibration; strength (0-8) -> pixel y
+  const px = (z: number) => PAD + (W - 2 * PAD) * zoneToTravel(z, zones)
+  const py = (y: number) => H - PAD - (y / 8) * (H - 2 * PAD)
+  const g = c.getContext('2d')!
+  g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  g.clearRect(0, 0, W, H)
+  const { force, vibration } = effectProfile(eff, 200)
+  // x is the analog trigger reading; zone coordinates map through the calibration
+  const xOf = (t: number) => px(t * 10)
+  // zones grid
+  g.strokeStyle = '#262a35'
+  for (let i = 0; i <= 10; i++) {
+    const x = xOf(i / 10)
+    g.beginPath()
+    g.moveTo(x, PAD)
+    g.lineTo(x, H - PAD)
+    g.stroke()
+  }
+  const plot = (arr: number[], color: string, fill: string) => {
+    g.beginPath()
+    g.moveTo(PAD, H - PAD)
+    arr.forEach((v, i) => g.lineTo(xOf(i / (arr.length - 1)), H - PAD - v * (H - 2 * PAD)))
+    g.lineTo(W - PAD, H - PAD)
+    g.closePath()
+    g.fillStyle = fill
+    g.fill()
+    g.strokeStyle = color
+    g.stroke()
+  }
+  plot(force, '#7aa2ff', 'rgba(77,124,255,0.25)')
+  if (vibration.some((v) => v > 0)) {
+    // vibration as a zig-zag band whose height is the vibration strength
+    g.strokeStyle = '#ffb347'
+    g.beginPath()
+    vibration.forEach((v, i) => {
+      const x = xOf(i / (vibration.length - 1))
+      const y = H - PAD - v * (H - 2 * PAD) * (i % 2 ? 1 : 0.6)
+      if (i === 0) g.moveTo(x, y)
+      else g.lineTo(x, y)
+    })
+    g.stroke()
+  }
+  // vibration curves: each zone's frequency along the top
+  if (!mini && eff.type === 'vibrationCurve') {
+    const freqs = zoneFrequencies(eff)
+    g.fillStyle = '#c9a25f'
+    g.font = '10px Segoe UI'
+    g.textAlign = 'center'
+    freqs.forEach((fz, z) => {
+      if (px(z + 1) - px(z) >= 16) g.fillText(String(fz), (px(z) + px(z + 1)) / 2, PAD + 9)
+    })
+    g.textAlign = 'start'
+  }
+  // the drawn curve and its points (the blocks/band above are what the trigger gets)
+  if (isCurve(eff) && eff.points.length) {
+    const pts = eff.points
+    g.strokeStyle = 'rgba(255,255,255,0.85)'
+    g.lineWidth = mini ? 1 : 1.5
+    g.beginPath()
+    g.moveTo(px(0), py(pts[0].y))
+    for (const p of pts) g.lineTo(px(p.x), py(p.y))
+    g.lineTo(px(10), py(pts[pts.length - 1].y))
+    g.stroke()
+    if (!mini)
+      pts.forEach((p, i) => {
+        const sel = i === opts.selected
+        g.beginPath()
+        g.arc(px(p.x), py(p.y), sel ? 6 : 4.5, 0, Math.PI * 2)
+        g.fillStyle = sel ? '#ffffff' : '#1b1e27'
+        g.fill()
+        g.strokeStyle = sel ? '#7aa2ff' : '#ffffff'
+        g.lineWidth = 2
+        g.stroke()
+      })
+    g.lineWidth = 1
+  }
+  // live trigger position
+  const pos = side === 'L2' ? dualSense.state.l2 : dualSense.state.r2
+  if (dualSense.connected) {
+    const x = PAD + (W - 2 * PAD) * pos
+    g.strokeStyle = '#3ad6a8'
+    g.lineWidth = 2
+    g.beginPath()
+    g.moveTo(x, PAD)
+    g.lineTo(x, H - PAD)
+    g.stroke()
+    g.lineWidth = 1
+  }
+  if (!mini) {
+    g.fillStyle = '#8b91a1'
+    g.font = '10px Segoe UI'
+    g.fillText('rest', PAD + 2, H - PAD - 2)
+    g.fillText('full pull', W - PAD - 42, H - PAD - 2)
+  }
+}
+
 /** Force/vibration vs trigger travel, with the live trigger position overlaid. Curve effects are edited here. */
 function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect; side: Side; zones: number[]; onPoints?: (p: CurvePoint[]) => void }) {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -347,103 +456,7 @@ function ProfileGraph({ effect, side, zones, onPoints }: { effect: TriggerEffect
     let raf = 0
     const draw = () => {
       raf = requestAnimationFrame(draw)
-      const c = ref.current
-      if (!c) return
-      const dpr = window.devicePixelRatio || 1
-      const { W, px, py } = geo()
-      if (c.width !== W * dpr || c.height !== H * dpr) {
-        c.width = W * dpr
-        c.height = H * dpr
-      }
-      const g = c.getContext('2d')!
-      g.setTransform(dpr, 0, 0, dpr, 0, 0)
-      g.clearRect(0, 0, W, H)
-      const eff = effRef.current
-      const { force, vibration } = effectProfile(eff, 200)
-      // x is the analog trigger reading; zone coordinates map through the calibration
-      const xOf = (t: number) => px(t * 10)
-      // zones grid
-      g.strokeStyle = '#262a35'
-      for (let i = 0; i <= 10; i++) {
-        const x = xOf(i / 10)
-        g.beginPath()
-        g.moveTo(x, PAD)
-        g.lineTo(x, H - PAD)
-        g.stroke()
-      }
-      const plot = (arr: number[], color: string, fill: string) => {
-        g.beginPath()
-        g.moveTo(PAD, H - PAD)
-        arr.forEach((v, i) => g.lineTo(xOf(i / (arr.length - 1)), H - PAD - v * (H - 2 * PAD)))
-        g.lineTo(W - PAD, H - PAD)
-        g.closePath()
-        g.fillStyle = fill
-        g.fill()
-        g.strokeStyle = color
-        g.stroke()
-      }
-      plot(force, '#7aa2ff', 'rgba(77,124,255,0.25)')
-      if (vibration.some((v) => v > 0)) {
-        // vibration as a zig-zag band whose height is the vibration strength
-        g.strokeStyle = '#ffb347'
-        g.beginPath()
-        vibration.forEach((v, i) => {
-          const x = xOf(i / (vibration.length - 1))
-          const y = H - PAD - v * (H - 2 * PAD) * (i % 2 ? 1 : 0.6)
-          if (i === 0) g.moveTo(x, y)
-          else g.lineTo(x, y)
-        })
-        g.stroke()
-      }
-      // vibration curves: each zone's frequency along the top
-      if (eff.type === 'vibrationCurve') {
-        const freqs = zoneFrequencies(eff)
-        g.fillStyle = '#c9a25f'
-        g.font = '10px Segoe UI'
-        g.textAlign = 'center'
-        freqs.forEach((fz, z) => {
-          if (px(z + 1) - px(z) >= 16) g.fillText(String(fz), (px(z) + px(z + 1)) / 2, PAD + 9)
-        })
-        g.textAlign = 'start'
-      }
-      // the drawn curve and its points (the blocks/band above are what the trigger gets)
-      if (isCurve(eff) && eff.points.length) {
-        const pts = eff.points
-        g.strokeStyle = 'rgba(255,255,255,0.85)'
-        g.lineWidth = 1.5
-        g.beginPath()
-        g.moveTo(px(0), py(pts[0].y))
-        for (const p of pts) g.lineTo(px(p.x), py(p.y))
-        g.lineTo(px(10), py(pts[pts.length - 1].y))
-        g.stroke()
-        pts.forEach((p, i) => {
-          const sel = i === selRef.current
-          g.beginPath()
-          g.arc(px(p.x), py(p.y), sel ? 6 : 4.5, 0, Math.PI * 2)
-          g.fillStyle = sel ? '#ffffff' : '#1b1e27'
-          g.fill()
-          g.strokeStyle = sel ? '#7aa2ff' : '#ffffff'
-          g.lineWidth = 2
-          g.stroke()
-        })
-        g.lineWidth = 1
-      }
-      // live trigger position
-      const pos = side === 'L2' ? dualSense.state.l2 : dualSense.state.r2
-      if (dualSense.connected) {
-        const x = PAD + (W - 2 * PAD) * pos
-        g.strokeStyle = '#3ad6a8'
-        g.lineWidth = 2
-        g.beginPath()
-        g.moveTo(x, PAD)
-        g.lineTo(x, H - PAD)
-        g.stroke()
-        g.lineWidth = 1
-      }
-      g.fillStyle = '#8b91a1'
-      g.font = '10px Segoe UI'
-      g.fillText('rest', PAD + 2, H - PAD - 2)
-      g.fillText('full pull', W - PAD - 42, H - PAD - 2)
+      if (ref.current) drawTriggerProfile(ref.current, H, effRef.current, side, zonesRef.current, { selected: selRef.current })
     }
     draw()
     return () => cancelAnimationFrame(raf)

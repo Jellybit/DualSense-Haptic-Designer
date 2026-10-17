@@ -252,6 +252,8 @@ export function ControllerView({ model, rig, showTouch = true }: Props) {
       const dist = Math.max(9 / Math.tan(hfov / 2), 6 / Math.tan(vfov / 2)) * 1.15
       camera.position.setLength(dist)
       camera.updateProjectionMatrix()
+      // resizing clears the canvas: draw again now, before the browser paints, so it doesn't flash blank
+      renderer.render(scene, camera)
     }
     const ro = new ResizeObserver(resize)
     ro.observe(mount)

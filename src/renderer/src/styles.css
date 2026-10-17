@@ -162,11 +162,64 @@ input[type='color'] {
   padding: 12px;
 }
 .sidepanel {
+  position: relative;
   border-left: 1px solid var(--line);
   background: var(--panel);
-  display: grid;
-  grid-template-rows: 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+}
+.sidepanel > .viewer {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 200px;
+}
+/* simplified motor and trigger graphs above the 3D view */
+.minigraphs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px 8px 0;
+}
+.mini {
+  position: relative;
+  background: #0f1117;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.mini canvas {
+  display: block;
+  width: 100%;
+}
+.mini-tag {
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.mini-tag.l {
+  color: var(--left);
+}
+.mini-tag.r {
+  color: var(--right);
+}
+/* drag handle on the 3D view's left edge */
+.side-splitter {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.side-splitter:hover,
+.side-splitter:active {
+  background: linear-gradient(90deg, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
 }
 .viewer {
   width: 100%;

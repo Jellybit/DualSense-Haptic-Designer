@@ -34,6 +34,7 @@ import { decodeWav, encodeWavChannels, resample } from '../../export/wav'
 import { loadLocal, PressTracker, saveLocal, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
 import { exportTriggerJson, TriggerPanel } from '../triggers/TriggerPanel'
+import { F_MAX, F_MIN, MotorGraphPainter, workbenchLive, type MotorAnalyser } from './motorGraph'
 
 const FACE_BUTTONS = ['cross', 'circle', 'square', 'triangle'] as const
 
@@ -451,6 +452,27 @@ export function WorkbenchPanel() {
     setAudition(ch)
   }
 
+  // The spectra follow the vibration preview, or this motor's Audio Play. Audio Play's analyser
+  // sits before Vibration Power / Normalize: scale it to what the motor gets
+  const motorAnalyser = (ch: number): MotorAnalyser => {
+    const node = graph.current?.analysers[ch]
+    if (node) return { node, gain: 1 }
+    return auditionGraph.current?.ch === ch ? { node: auditionGraph.current.analyser, gain: motorGain } : null
+  }
+  const srcAnalyser = (ch: number) => graph.current?.srcAnalyser ?? (auditionGraph.current?.ch === ch ? auditionGraph.current.srcAnalyser : null)
+  // ...and the minis above the 3D view show the same
+  workbenchLive.eqs = eqs
+  workbenchLive.analyser = motorAnalyser
+  workbenchLive.srcAnalyser = srcAnalyser
+  useEffect(
+    () => () => {
+      workbenchLive.eqs = null
+      workbenchLive.analyser = () => null
+      workbenchLive.srcAnalyser = () => null
+    },
+    [],
+  )
+
   // EQ edits apply live to the running preview
   useEffect(() => {
     const g = graph.current
@@ -822,13 +844,8 @@ export function WorkbenchPanel() {
                 canAudition={!!audio}
                 onAudition={() => (audition === ch ? stopAudition() : void startAudition(ch))}
                 // the spectra follow the vibration preview, or this motor's Audio Play
-                // Audio Play's analyser sits before Vibration Power / Normalize: scale it to what the motor gets
-                analyser={() => {
-                  const node = graph.current?.analysers[ch]
-                  if (node) return { node, gain: 1 }
-                  return auditionGraph.current?.ch === ch ? { node: auditionGraph.current.analyser, gain: motorGain } : null
-                }}
-                srcAnalyser={() => graph.current?.srcAnalyser ?? (auditionGraph.current?.ch === ch ? auditionGraph.current.srcAnalyser : null)}
+                analyser={() => motorAnalyser(ch)}
+                srcAnalyser={() => srcAnalyser(ch)}
               />
             ))}
           </div>
@@ -845,14 +862,6 @@ export function WorkbenchPanel() {
 
 // --- one EQ ------------------------------------------------------------------------
 
-const curveCtx = new OfflineAudioContext(1, 128, SAMPLE_RATE)
-const F_MIN = 20
-const F_MAX = 20000
-/** spectrum graph range: this many dB at the bottom, 0 dB at the top */
-const SPEC_FLOOR_DB = -100
-/** on a clipped frame, frequencies this close to the loudest one are marked */
-const CLIP_SPREAD_DB = 6
-
 function EqCard(props: {
   ch: number
   eq: EqSettings
@@ -864,125 +873,27 @@ function EqCard(props: {
   auditioning: boolean
   canAudition: boolean
   onAudition: () => void
-  /** this motor's live signal; `gain` scales it to what the motor gets */
-  analyser: () => { node: AnalyserNode; gain: number } | null
+  /** this motor's live signal */
+  analyser: () => MotorAnalyser
   srcAnalyser: () => AnalyserNode | null
 }) {
   const { ch, eq, onChange } = props
-  const chain = useMemo(() => new EqChain(curveCtx, eq), [])
-  chain.update(eq)
+  const painter = useMemo(() => new MotorGraphPainter(ch), [ch])
   const canvas = useRef<HTMLCanvasElement>(null)
-  const eqRef = useRef(eq)
-  eqRef.current = eq
   const getters = useRef(props)
   getters.current = props
 
   useEffect(() => {
     let raf = 0
-    const W0 = 600
-    const freqs = new Float32Array(W0)
-    for (let i = 0; i < W0; i++) freqs[i] = F_MIN * Math.pow(F_MAX / F_MIN, i / (W0 - 1))
-    let spec: Float32Array<ArrayBuffer> | null = null
-    let srcSpec: Float32Array<ArrayBuffer> | null = null
-    let wave: Float32Array<ArrayBuffer> | null = null
-    /** per spectrum column (2 px): how red, fading after a clipped frame */
-    let heat = new Float32Array(0)
     const draw = () => {
       raf = requestAnimationFrame(draw)
       const c = canvas.current
-      if (!c) return
-      const dpr = window.devicePixelRatio || 1
-      const W = c.clientWidth
-      const H = 130
-      if (c.width !== Math.round(W * dpr)) {
-        c.width = Math.round(W * dpr)
-        c.height = H * dpr
-      }
-      const g = c.getContext('2d')!
-      g.setTransform(dpr, 0, 0, dpr, 0, 0)
-      g.clearRect(0, 0, W, H)
-      const xOf = (f: number) => (Math.log(f / F_MIN) / Math.log(F_MAX / F_MIN)) * W
-      // grid
-      g.strokeStyle = '#262a35'
-      g.fillStyle = '#5d6475'
-      g.font = '9px Segoe UI'
-      for (const f of EQ_BANDS) {
-        const x = xOf(f)
-        g.beginPath()
-        g.moveTo(x, 0)
-        g.lineTo(x, H)
-        g.stroke()
-        g.fillText(f >= 1000 ? `${f / 1000}k` : String(f), x + 2, H - 3)
-      }
-      const yDb = (db: number) => H / 2 - (db / 30) * (H / 2)
-      g.beginPath()
-      g.moveTo(0, yDb(0))
-      g.lineTo(W, yDb(0))
-      g.stroke()
-
-      // live spectra: the file (faint) and this channel's output, 0 dB at the top so strong sounds stay on the graph
-      const specY = (db: number) => H - Math.max(0, Math.min(1, (db - SPEC_FLOOR_DB) / -SPEC_FLOOR_DB)) * H
-      const specDb = (buf: Float32Array, binHz: number, x: number) => buf[Math.min(buf.length - 1, Math.round((F_MIN * Math.pow(F_MAX / F_MIN, x / W)) / binHz))]
-      const drawSpec = (an: AnalyserNode | null, buf: Float32Array<ArrayBuffer> | null, fill: string, boostDb = 0) => {
-        if (!an) return buf
-        if (!buf || buf.length !== an.frequencyBinCount) buf = new Float32Array(an.frequencyBinCount)
-        an.getFloatFrequencyData(buf)
-        const binHz = an.context.sampleRate / an.fftSize
-        g.beginPath()
-        g.moveTo(0, H)
-        for (let x = 0; x < W; x += 2) g.lineTo(x, specY(specDb(buf, binHz, x) + boostDb))
-        g.lineTo(W, H)
-        g.closePath()
-        g.fillStyle = fill
-        g.fill()
-        return buf
-      }
-      srcSpec = drawSpec(getters.current.srcAnalyser(), srcSpec, 'rgba(140,150,170,0.18)')
-      const mot = getters.current.analyser()
-      const boostDb = mot ? 20 * Math.log10(Math.max(1e-6, mot.gain)) : 0
-      spec = drawSpec(mot?.node ?? null, spec, ch === 0 ? 'rgba(90,169,255,0.45)' : 'rgba(143,209,79,0.45)', boostDb)
-
-      // Clipping: on frames where this motor's signal goes past full scale, the frequencies
-      // carrying most of the energy right then (within CLIP_SPREAD_DB of the loudest) turn red
-      const cols = Math.ceil(W / 2)
-      if (heat.length !== cols) heat = new Float32Array(cols)
-      for (let i = 0; i < cols; i++) heat[i] *= 0.8
-      if (mot && spec) {
-        const an = mot.node
-        if (!wave || wave.length !== an.fftSize) wave = new Float32Array(an.fftSize)
-        an.getFloatTimeDomainData(wave)
-        let peak = 0
-        for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]))
-        if (peak * mot.gain > 1) {
-          const binHz = an.context.sampleRate / an.fftSize
-          let loudest = -Infinity
-          for (let i = 0; i < cols; i++) loudest = Math.max(loudest, specDb(spec, binHz, i * 2))
-          for (let i = 0; i < cols; i++) if (specDb(spec, binHz, i * 2) >= loudest - CLIP_SPREAD_DB) heat[i] = 1
-        }
-      }
-      for (let i = 0; i < cols; i++) {
-        if (heat[i] < 0.03) continue
-        g.fillStyle = `rgba(255,48,48,${(0.55 * heat[i]).toFixed(3)})`
-        g.fillRect(i * 2, 0, 2, H)
-      }
-
-      // EQ curve
-      const resp = chain.response(freqs)
-      g.strokeStyle = eqRef.current.mute ? '#555' : '#ffb347'
-      g.lineWidth = 2
-      g.beginPath()
-      for (let i = 0; i < W0; i++) {
-        const x = (i / (W0 - 1)) * W
-        const y = Math.max(0, Math.min(H, yDb(resp[i])))
-        if (i === 0) g.moveTo(x, y)
-        else g.lineTo(x, y)
-      }
-      g.stroke()
-      g.lineWidth = 1
+      const p = getters.current
+      if (c) painter.draw(c, 130, p.eq, p.analyser(), p.srcAnalyser())
     }
     draw()
     return () => cancelAnimationFrame(raf)
-  }, [chain, ch])
+  }, [painter])
 
   const hz = (v: number) => (v === 0 ? 'off' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)
   // log-scale slider helpers for the cut filters (0 = off at the slider's end)
