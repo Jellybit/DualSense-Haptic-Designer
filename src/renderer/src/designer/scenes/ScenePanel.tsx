@@ -28,7 +28,7 @@ import type { LiquidSim } from './liquid'
 const MATERIALS: Material[] = ['wood', 'glass', 'metal', 'rubber', 'stone', 'soft']
 
 export function ScenePanel() {
-  const [cfg, setCfgState] = useState<SceneConfig>(() => loadLocal('dshd.scene', SCENE_PRESETS[4].make()))
+  const [cfg, setCfgState] = useState<SceneConfig>(() => loadLocal('dshd.scene', SCENE_PRESETS[2].make()))
   const [running, setRunning] = useState(true)
   const [master, setMasterState] = useState(() => loadLocal('dshd.scene.master', 1.5))
   const [msg, setMsg] = useState<string | null>(null)
@@ -46,7 +46,7 @@ export function ScenePanel() {
     () =>
       onReset((s) => {
         if (s !== 'scene') return
-        setCfgState(SCENE_PRESETS[4].make())
+        setCfgState(SCENE_PRESETS[2].make())
         setMasterState(1.5)
         setMsg(null)
       }),

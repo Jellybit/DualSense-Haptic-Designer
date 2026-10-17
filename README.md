@@ -275,6 +275,11 @@ The bundled model is recognised automatically, with its parts found by position:
 
 Keep this credit if you redistribute the model.
 
+## License
+
+The app's code and icon are [MIT](LICENSE). The bundled 3D model isn't: it stays under its own
+CC-BY-4.0 license above.
+
 ---
 
 ## Running it

@@ -2,6 +2,7 @@
   "name": "dualsense-haptic-designer",
   "version": "0.1.0",
   "description": "Design DualSense haptics, adaptive-trigger effects and 'things inside the controller' scenes.",
+  "license": "MIT",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
