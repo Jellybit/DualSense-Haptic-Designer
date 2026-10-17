@@ -84,7 +84,7 @@ const PC_SINK_KEY = 'dshd.workbench.pcSink'
 const AUDIO_FILTER = [{ name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'flac', 'm4a'] }]
 const LAST_FILE_KEY = 'dshd.workbench.file'
 const EQ_KEY = 'dshd.workbench.motorEqs'
-const LANE_COLORS = ['#5aa9ff', '#ff7a9c']
+const LANE_COLORS = ['#5aa9ff', '#8fd14f']
 
 interface LoadedAudio {
   name: string
@@ -113,6 +113,18 @@ interface PreviewGraph {
   speakerNodes: AudioNode[]
   /** the original sound on the PC output, once its context is ready */
   pcSource: AudioBufferSourceNode | null
+}
+
+/** Audio Play: one motor's EQ'd signal on the PC output, to hear what that motor gets. */
+interface AuditionGraph {
+  ch: number
+  source: AudioBufferSourceNode
+  split: ChannelSplitterNode
+  trim: GainNode
+  chain: EqChain
+  eqSource: EqSource
+  analyser: AnalyserNode
+  srcAnalyser: AnalyserNode
 }
 
 async function decodeAudioFile(name: string, bytes: Uint8Array, path?: string): Promise<LoadedAudio> {
@@ -169,12 +181,23 @@ export function WorkbenchPanel() {
   // rendered matches the latest EQs once its debounced render lands
   const normGain = useMemo(() => (rendered ? normalizeGain(rendered, eqs) : 1), [rendered]) // eslint-disable-line react-hooks/exhaustive-deps
   const motorGain = normalize ? normGain : volume
+  // each motor's loudest point as the motor gets it (1 = full power; above that it clips)
+  const motorPeaks = useMemo(
+    () =>
+      rendered?.map((c) => {
+        let p = 0
+        for (let i = 0; i < c.length; i++) p = Math.max(p, Math.abs(c[i]))
+        return p
+      }) ?? null,
+    [rendered],
+  )
   // Reset Motor Settings: EQs, power, normalize, play options back to defaults; unload the sound
   useEffect(
     () =>
       onReset((s) => {
         if (s !== 'motor') return
         stopPreview()
+        stopAudition()
         setAudio(null)
         setRendered(null)
         setPlayhead(0)
@@ -207,6 +230,7 @@ export function WorkbenchPanel() {
     setMsg(null)
     try {
       stopPreview()
+      stopAudition()
       const a = await decodeAudioFile(name, bytes, path)
       setAudio(a)
       setPlayhead(0)
@@ -364,6 +388,69 @@ export function WorkbenchPanel() {
     }
   }
 
+  // --- Audio Play ---------------------------------------------------------------------
+  const [audition, setAudition] = useState<number | null>(null)
+  const auditionGraph = useRef<AuditionGraph | null>(null)
+  /** bumped on every start/stop, so a start still waiting for the PC output can tell it was superseded */
+  const auditionToken = useRef(0)
+  /** A motor's settings for listening: its Mute is for the vibration, so it doesn't silence this */
+  const audible = (e: EqSettings): EqSettings => ({ ...e, mute: false })
+
+  function stopAudition() {
+    auditionToken.current++
+    const a = auditionGraph.current
+    auditionGraph.current = null
+    if (a) {
+      a.source.onended = null
+      try {
+        a.source.stop()
+      } catch {
+        /* not started */
+      }
+      a.source.disconnect()
+      a.split.disconnect()
+      a.trim.disconnect()
+      a.chain.disconnect()
+      a.analyser.disconnect()
+    }
+    setAudition(null)
+  }
+
+  async function startAudition(ch: number) {
+    const { audio: a, eqs: e, loop: lp, pcSink: sink } = latest.current
+    if (!a) return
+    stopAudition()
+    const token = auditionToken.current
+    const pc = await pcContext(sink)
+    if (token !== auditionToken.current) return
+    void pc.resume()
+    let pcb = pcBufferCache.current
+    if (!pcb || pcb.audio !== a || pcb.ctx !== pc) {
+      pcb = { audio: a, ctx: pc, buffer: audioBufferFrom(pc, a.channels, SAMPLE_RATE) }
+      pcBufferCache.current = pcb
+    }
+    const analyser = pc.createAnalyser()
+    analyser.fftSize = 4096
+    analyser.smoothingTimeConstant = 0.75
+    // the motor signal is mono: it plays centred on the PC speakers
+    const g = buildGraph(pc, pcb.buffer, [audible(e[ch])], (node) => {
+      node.connect(analyser)
+      node.connect(pc.destination)
+    })
+    const srcAnalyser = pc.createAnalyser()
+    srcAnalyser.fftSize = 4096
+    srcAnalyser.smoothingTimeConstant = 0.75
+    g.source.connect(srcAnalyser)
+    g.source.loop = lp
+    const ag: AuditionGraph = { ch, source: g.source, split: g.split, trim: g.trims[0], chain: g.chains[0], eqSource: e[ch].source, analyser, srcAnalyser }
+    g.source.onended = () => {
+      if (auditionGraph.current === ag) stopAudition()
+    }
+    g.source.start()
+    auditionGraph.current = ag
+    setAudition(ch)
+  }
+
   // EQ edits apply live to the running preview
   useEffect(() => {
     const g = graph.current
@@ -380,11 +467,29 @@ export function WorkbenchPanel() {
     })
   }, [eqs])
 
+  // ... and to Audio Play
+  useEffect(() => {
+    const a = auditionGraph.current
+    if (!a) return
+    const e = eqs[a.ch]
+    a.chain.update(audible(e))
+    if (a.eqSource !== e.source) {
+      const n = a.source.buffer!.numberOfChannels
+      a.split.disconnect(a.trim)
+      feedSource(a.split, n, e.source, a.trim)
+      a.trim.gain.value = sourceTrim(e.source, n)
+      a.eqSource = e.source
+    }
+  }, [eqs]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const g = graph.current
     if (!g) return
     g.source.loop = loop
     if (g.pcSource) g.pcSource.loop = loop
+  }, [loop])
+  useEffect(() => {
+    if (auditionGraph.current) auditionGraph.current.source.loop = loop
   }, [loop])
   const [vibrationMsg, setVibrationMsg] = useState<string | null>(null)
   const connectVibration = async () => {
@@ -406,6 +511,7 @@ export function WorkbenchPanel() {
   // PC sound output: open it ahead of time, and list the outputs other than the controller
   useEffect(() => {
     saveLocal(PC_SINK_KEY, pcSink)
+    stopAudition()
     void pcContext(pcSink)
   }, [pcSink])
   useEffect(() => {
@@ -444,6 +550,7 @@ export function WorkbenchPanel() {
   useEffect(
     () => () => {
       stopPreview()
+      stopAudition()
       hapticEngine.setMasterGain(1)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -562,7 +669,7 @@ export function WorkbenchPanel() {
               Export 4-ch WAV…
             </button>
             <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. For engines/middleware that route haptics themselves.">
-              Export stereo WAV…
+              Export Haptics-only WAV…
             </button>
             <button className="primary" onClick={() => void exportJson()}>
               Export trigger JSON…
@@ -710,8 +817,18 @@ export function WorkbenchPanel() {
                 eq={eqs[ch]}
                 sourceOptions={sourceOptions}
                 onChange={(p) => changeEq(ch, p)}
-                analyser={() => graph.current?.analysers[ch] ?? null}
-                srcAnalyser={() => graph.current?.srcAnalyser ?? null}
+                peak={motorPeaks ? motorPeaks[ch] * motorGain : null}
+                auditioning={audition === ch}
+                canAudition={!!audio}
+                onAudition={() => (audition === ch ? stopAudition() : void startAudition(ch))}
+                // the spectra follow the vibration preview, or this motor's Audio Play
+                // Audio Play's analyser sits before Vibration Power / Normalize: scale it to what the motor gets
+                analyser={() => {
+                  const node = graph.current?.analysers[ch]
+                  if (node) return { node, gain: 1 }
+                  return auditionGraph.current?.ch === ch ? { node: auditionGraph.current.analyser, gain: motorGain } : null
+                }}
+                srcAnalyser={() => graph.current?.srcAnalyser ?? (auditionGraph.current?.ch === ch ? auditionGraph.current.srcAnalyser : null)}
               />
             ))}
           </div>
@@ -731,13 +848,24 @@ export function WorkbenchPanel() {
 const curveCtx = new OfflineAudioContext(1, 128, SAMPLE_RATE)
 const F_MIN = 20
 const F_MAX = 20000
+/** spectrum graph range: this many dB at the bottom, 0 dB at the top */
+const SPEC_FLOOR_DB = -100
+/** on a clipped frame, frequencies this close to the loudest one are marked */
+const CLIP_SPREAD_DB = 6
 
 function EqCard(props: {
   ch: number
   eq: EqSettings
   sourceOptions: { value: EqSource; label: string }[]
   onChange: (p: Partial<EqSettings>) => void
-  analyser: () => AnalyserNode | null
+  /** loudest point this motor gets (1 = full power), null while rendering or with no sound */
+  peak: number | null
+  /** Audio Play: this motor's EQ'd signal on the PC output */
+  auditioning: boolean
+  canAudition: boolean
+  onAudition: () => void
+  /** this motor's live signal; `gain` scales it to what the motor gets */
+  analyser: () => { node: AnalyserNode; gain: number } | null
   srcAnalyser: () => AnalyserNode | null
 }) {
   const { ch, eq, onChange } = props
@@ -756,6 +884,9 @@ function EqCard(props: {
     for (let i = 0; i < W0; i++) freqs[i] = F_MIN * Math.pow(F_MAX / F_MIN, i / (W0 - 1))
     let spec: Float32Array<ArrayBuffer> | null = null
     let srcSpec: Float32Array<ArrayBuffer> | null = null
+    let wave: Float32Array<ArrayBuffer> | null = null
+    /** per spectrum column (2 px): how red, fading after a clipped frame */
+    let heat = new Float32Array(0)
     const draw = () => {
       raf = requestAnimationFrame(draw)
       const c = canvas.current
@@ -789,19 +920,17 @@ function EqCard(props: {
       g.lineTo(W, yDb(0))
       g.stroke()
 
-      // live spectra: the file (faint) and this channel's output
-      const drawSpec = (an: AnalyserNode | null, buf: Float32Array<ArrayBuffer> | null, fill: string) => {
+      // live spectra: the file (faint) and this channel's output, 0 dB at the top so strong sounds stay on the graph
+      const specY = (db: number) => H - Math.max(0, Math.min(1, (db - SPEC_FLOOR_DB) / -SPEC_FLOOR_DB)) * H
+      const specDb = (buf: Float32Array, binHz: number, x: number) => buf[Math.min(buf.length - 1, Math.round((F_MIN * Math.pow(F_MAX / F_MIN, x / W)) / binHz))]
+      const drawSpec = (an: AnalyserNode | null, buf: Float32Array<ArrayBuffer> | null, fill: string, boostDb = 0) => {
         if (!an) return buf
         if (!buf || buf.length !== an.frequencyBinCount) buf = new Float32Array(an.frequencyBinCount)
         an.getFloatFrequencyData(buf)
         const binHz = an.context.sampleRate / an.fftSize
         g.beginPath()
         g.moveTo(0, H)
-        for (let x = 0; x < W; x += 2) {
-          const f = F_MIN * Math.pow(F_MAX / F_MIN, x / W)
-          const db = buf[Math.min(buf.length - 1, Math.round(f / binHz))]
-          g.lineTo(x, H - Math.max(0, Math.min(1, (db + 100) / 80)) * H)
-        }
+        for (let x = 0; x < W; x += 2) g.lineTo(x, specY(specDb(buf, binHz, x) + boostDb))
         g.lineTo(W, H)
         g.closePath()
         g.fillStyle = fill
@@ -809,7 +938,33 @@ function EqCard(props: {
         return buf
       }
       srcSpec = drawSpec(getters.current.srcAnalyser(), srcSpec, 'rgba(140,150,170,0.18)')
-      spec = drawSpec(getters.current.analyser(), spec, ch === 0 ? 'rgba(90,169,255,0.45)' : 'rgba(255,122,156,0.45)')
+      const mot = getters.current.analyser()
+      const boostDb = mot ? 20 * Math.log10(Math.max(1e-6, mot.gain)) : 0
+      spec = drawSpec(mot?.node ?? null, spec, ch === 0 ? 'rgba(90,169,255,0.45)' : 'rgba(143,209,79,0.45)', boostDb)
+
+      // Clipping: on frames where this motor's signal goes past full scale, the frequencies
+      // carrying most of the energy right then (within CLIP_SPREAD_DB of the loudest) turn red
+      const cols = Math.ceil(W / 2)
+      if (heat.length !== cols) heat = new Float32Array(cols)
+      for (let i = 0; i < cols; i++) heat[i] *= 0.8
+      if (mot && spec) {
+        const an = mot.node
+        if (!wave || wave.length !== an.fftSize) wave = new Float32Array(an.fftSize)
+        an.getFloatTimeDomainData(wave)
+        let peak = 0
+        for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]))
+        if (peak * mot.gain > 1) {
+          const binHz = an.context.sampleRate / an.fftSize
+          let loudest = -Infinity
+          for (let i = 0; i < cols; i++) loudest = Math.max(loudest, specDb(spec, binHz, i * 2))
+          for (let i = 0; i < cols; i++) if (specDb(spec, binHz, i * 2) >= loudest - CLIP_SPREAD_DB) heat[i] = 1
+        }
+      }
+      for (let i = 0; i < cols; i++) {
+        if (heat[i] < 0.03) continue
+        g.fillStyle = `rgba(255,48,48,${(0.55 * heat[i]).toFixed(3)})`
+        g.fillRect(i * 2, 0, 2, H)
+      }
 
       // EQ curve
       const resp = chain.response(freqs)
@@ -863,6 +1018,14 @@ function EqCard(props: {
           <button className={eq.mute ? 'active' : ''} onClick={() => onChange({ mute: !eq.mute })}>
             {eq.mute ? 'Muted' : 'Mute'}
           </button>
+          <button
+            className={props.auditioning ? 'active' : ''}
+            disabled={!props.canAudition}
+            onClick={props.onAudition}
+            title="Hear what this motor gets (its source channel and EQ) on the PC sound output"
+          >
+            {props.auditioning ? '■ Stop' : 'Audio Play'}
+          </button>
         </>
       }
     >
@@ -896,14 +1059,28 @@ function EqCard(props: {
       </div>
       <Param label="Low cut (Hz)" value={toSlider(eq.hpf, 'min')} min={0} max={1000} onChange={(v) => onChange({ hpf: fromSlider(v, 'min') })} format={() => hz(eq.hpf)} />
       <Param label="High cut (Hz)" value={toSlider(eq.lpf, 'max')} min={0} max={1000} onChange={(v) => onChange({ lpf: fromSlider(v, 'max') })} format={() => hz(eq.lpf)} />
-      <Param label="Gain (dB)" value={eq.gainDb} min={-24} max={12} step={0.5} onChange={(v) => onChange({ gainDb: v })} format={(v) => (v > 0 ? `+${v}` : String(v))} />
+      <Param
+        label={
+          <>
+            Gain (dB)
+            {props.peak !== null && props.peak > 1 && !eq.mute && (
+              <span
+                className="clip-badge"
+                title={`This motor's signal goes past the top of the range (peaks at ${Math.round(props.peak * 100)}%). It's safe: the controller never gets more than its normal maximum, the extra is just cut off flat. But that loses detail in the strongest moments, which can feel harsher or buzzier than intended. To fix it, lower Gain or the boosted EQ bands, or turn down Vibration Power. Clipped moments show in red in the sound's waveform at the top of the page, and in this motor's graph while it plays.`}
+              >
+                <span className="clip-dot">!</span>Clips
+              </span>
+            )}
+          </>
+        }
+        value={eq.gainDb} min={-24} max={12} step={0.5} onChange={(v) => onChange({ gainDb: v })} format={(v) => (v > 0 ? `+${v}` : String(v))} />
     </Card>
   )
 }
 
 // --- 4-lane waveform of the rendered output ----------------------------------------------
 
-/** The two motor signals as the motors get them (after Vibration Power / Normalize); clipped spots in yellow. */
+/** The two motor signals as the motors get them (after Vibration Power / Normalize); clipped spots in red. */
 function MotorWaveform({ channels, gain, playhead, duration }: { channels: Float32Array[] | null; gain: number; playhead: number; duration: number }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const H = 2 * 60
@@ -931,7 +1108,7 @@ function MotorWaveform({ channels, gain, playhead, duration }: { channels: Float
         mn *= gain
         mx *= gain
         const h = lane / 2 - 3
-        g.fillStyle = mx > 1 || mn < -1 ? '#ffd84a' : LANE_COLORS[k]
+        g.fillStyle = mx > 1 || mn < -1 ? '#ff3030' : LANE_COLORS[k]
         g.fillRect(px, y0 + lane / 2 - Math.min(1, mx) * h, 1, Math.max(1, (Math.min(1, mx) - Math.max(-1, mn)) * h))
       }
       g.fillStyle = '#8b91a1'

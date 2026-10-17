@@ -1,17 +1,17 @@
 // Scene designer: live "things inside the controller" simulation driven by real tilt,
-// touchpad and buttons, with record-to-WAV.
+// touchpad and buttons.
 
 import { platform } from '../../platform'
 import { useEffect, useRef, useState } from 'react'
 import { dualSense } from '../../device/hid'
-import { hapticEngine, Recorder } from '../../haptics/engine'
-import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
-import { encodeWav } from '../../export/wav'
+import { hapticEngine } from '../../haptics/engine'
+import type { Material } from '../../haptics/dsp'
 import { loadLocal, PressTracker, saveLocal, tracker, useConnection, virtualTilt } from '../../store'
 import { Card, downloadName, Param, Select } from '../../ui/controls'
 import { confirmReset, onReset, RESET_LABELS, resetSection } from '../../resets'
 import {
   defaultCritters,
+  DEFAULT_DEPTH_FADE,
   defaultLiquid,
   defaultMarbles,
   SCENE_PRESETS,
@@ -30,16 +30,13 @@ const MATERIALS: Material[] = ['wood', 'glass', 'metal', 'rubber', 'stone', 'sof
 export function ScenePanel() {
   const [cfg, setCfgState] = useState<SceneConfig>(() => loadLocal('dshd.scene', SCENE_PRESETS[4].make()))
   const [running, setRunning] = useState(true)
-  const [tiltSource, setTiltSource] = useState<'controller' | 'virtual'>('controller')
-  const [recording, setRecording] = useState(false)
-  const [recLen, setRecLen] = useState(0)
+  const [master, setMasterState] = useState(() => loadLocal('dshd.scene.master', 1.5))
   const [msg, setMsg] = useState<string | null>(null)
   const info = useConnection()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const simRef = useRef<SceneSim | null>(null)
-  const recorder = useRef(new Recorder())
   const mouseFinger = useRef<{ x: number; y: number } | null>(null)
-  const pending = useRef({ jump: false, kick: false })
+  const pending = useRef({ jump: false, kick: false, toss: false })
 
   const setCfg = (c: SceneConfig) => {
     setCfgState(c)
@@ -50,10 +47,23 @@ export function ScenePanel() {
       onReset((s) => {
         if (s !== 'scene') return
         setCfgState(SCENE_PRESETS[4].make())
+        setMasterState(1.5)
         setMsg(null)
       }),
     [],
   )
+
+  // Master gain lives on the shared engine: apply it while the scene is open (and again if
+  // the audio output restarts), and hand the engine back at 1 when leaving
+  useEffect(() => {
+    saveLocal('dshd.scene.master', master)
+    hapticEngine.setMasterGain(master)
+    const off = hapticEngine.onStatus(() => hapticEngine.setMasterGain(master))
+    return () => {
+      off()
+      hapticEngine.setMasterGain(1)
+    }
+  }, [master])
 
   // Create the sim once; push config changes into it
   if (!simRef.current) {
@@ -86,7 +96,8 @@ export function ScenePanel() {
       const dt = Math.min(0.05, (now - last) / 1000)
       last = now
       const s = dualSense.state
-      const useController = tiltSource === 'controller' && dualSense.connected && s.full
+      // Controller tilt when it is streaming; otherwise the right-drag virtual tilt
+      const useController = dualSense.connected && s.full
 
       // Gravity in the box plane: controller x → box x, controller z (toward player) → box y
       let gx = virtualTilt.x
@@ -108,22 +119,22 @@ export function ScenePanel() {
         finger,
         jump: pending.current.jump || presses.pressed('cross', s.buttons.cross),
         kick: pending.current.kick || presses.pressed('square', s.buttons.square),
+        lift: pending.current.toss ? 1 : useController ? tracker.takeLift() : 0,
       }
-      pending.current = { jump: false, kick: false }
+      pending.current = { jump: false, kick: false, toss: false }
       if (presses.pressed('triangle', s.buttons.triangle)) {
         sim.cfg.entities.forEach((e) => e.kind === 'marble' && (e.count = Math.min(12, e.count + 1)))
         sim.rebuild()
       }
       sim.step(dt, inp)
       draw(canvasRef.current, sim, inp)
-      if (recorder.current.recording) setRecLen(recorder.current.length / SAMPLE_RATE)
     }
     loop()
     return () => {
       cancelAnimationFrame(raf)
       sim.silence()
     }
-  }, [running, tiltSource])
+  }, [running])
 
   // Mouse: left-drag = finger; right-drag = virtual tilt
   const onPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -139,23 +150,6 @@ export function ScenePanel() {
     } else {
       mouseFinger.current = null
     }
-  }
-
-  const toggleRecord = async () => {
-    if (!recording) {
-      recorder.current.start(hapticEngine)
-      setRecording(true)
-      setMsg(null)
-      return
-    }
-    const { L, R } = recorder.current.stop()
-    setRecording(false)
-    if (L.length === 0) {
-      setMsg('Nothing recorded — is the audio engine running?')
-      return
-    }
-    const path = await platform.saveFile(downloadName(`${cfg.name}-recording`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], encodeWav(L, R, SAMPLE_RATE, 'stereo'))
-    if (path) setMsg(`Saved ${(L.length / SAMPLE_RATE).toFixed(1)} s to ${path}`)
   }
 
   const exportScene = async () => {
@@ -184,19 +178,9 @@ export function ScenePanel() {
         <button className={running ? 'active' : 'primary'} onClick={() => setRunning(!running)}>
           {running ? '❚❚ Pause' : '▶ Run'}
         </button>
-        <button className={recording ? 'danger active' : ''} onClick={() => void toggleRecord()}>
-          {recording ? `■ Stop & save (${recLen.toFixed(1)} s)` : '● Record to WAV'}
-        </button>
-        <Select
-          value={tiltSource}
-          options={[
-            { value: 'controller', label: 'Tilt: controller IMU' },
-            { value: 'virtual', label: 'Tilt: virtual (right-drag)' },
-          ]}
-          onChange={(v) => setTiltSource(v)}
-        />
         <button onClick={() => (pending.current.jump = true)}>Jump</button>
         <button onClick={() => (pending.current.kick = true)}>Shake</button>
+        <button onClick={() => (pending.current.toss = true)}>Toss</button>
         <div className="spacer" />
         <select value="" onChange={(e) => e.target.value && setCfg(SCENE_PRESETS[Number(e.target.value)].make())}>
           <option value="">Load preset…</option>
@@ -229,7 +213,7 @@ export function ScenePanel() {
       />
       <p className="muted small">
         Tilt the controller to roll/slide things around · touch the touchpad to poke them · <kbd>✕</kbd> makes critters jump · <kbd>□</kbd> shakes the box ·{' '}
-        <kbd>△</kbd> adds a marble · physically shaking the controller also works.
+        <kbd>△</kbd> adds a marble · lift the controller quickly to toss everything up · physically shaking the controller also works.
       </p>
 
       <div className="grid2">
@@ -244,7 +228,8 @@ export function ScenePanel() {
           <Param label="Gravity" value={cfg.gravity} min={0} max={3} step={0.05} onChange={(v) => setCfg({ ...cfg, gravity: v })} format={(v) => `×${v.toFixed(2)}`} />
           <Select label="Wall material" value={cfg.wallMaterial} options={MATERIALS} onChange={(v) => setCfg({ ...cfg, wallMaterial: v })} />
           <Param label="Wall hit gain" value={cfg.wallGain} min={0} max={2} step={0.05} onChange={(v) => setCfg({ ...cfg, wallGain: v })} format={(v) => v.toFixed(2)} />
-          <Param label="Master gain" value={hapticEngine.master?.gain.value ?? 1} min={0} max={2} step={0.05} onChange={(v) => hapticEngine.setMasterGain(v)} format={(v) => v.toFixed(2)} />
+          <Param label="Top/bottom loudness" value={cfg.depthFade ?? DEFAULT_DEPTH_FADE} min={0} max={1} step={0.05} onChange={(v) => setCfg({ ...cfg, depthFade: v })} format={(v) => `±${(v * 10).toFixed(0)} dB`} />
+          <Param label="Master gain" value={master} min={0} max={2} step={0.05} onChange={setMasterState} format={(v) => v.toFixed(2)} />
         </Card>
         <Card
           title="Things inside"
@@ -291,10 +276,10 @@ function MarbleParams({ e, onChange }: { e: MarbleConfig; onChange: (p: Partial<
     <>
       <Param label="Count" value={e.count} min={1} max={12} onChange={(v) => onChange({ count: v })} />
       <Param label="Radius (cm)" value={e.radius} min={0.2} max={2} step={0.05} onChange={(v) => onChange({ radius: v })} format={(v) => v.toFixed(2)} />
+      <Param label="Size variation" value={e.sizeVariation ?? 0} min={0} max={0.5} step={0.05} onChange={(v) => onChange({ sizeVariation: v })} format={(v) => `±${Math.round(v * 100)}%`} />
       <Param label="Mass" value={e.mass} min={0.2} max={5} step={0.1} onChange={(v) => onChange({ mass: v })} format={(v) => v.toFixed(1)} />
       <Param label="Bounciness" value={e.restitution} min={0} max={0.95} step={0.05} onChange={(v) => onChange({ restitution: v })} format={(v) => v.toFixed(2)} />
       <Param label="Rolling friction" value={e.rollingFriction} min={0} max={3} step={0.05} onChange={(v) => onChange({ rollingFriction: v })} format={(v) => v.toFixed(2)} />
-      <Select label="Material" value={e.material} options={MATERIALS} onChange={(v) => onChange({ material: v })} />
       <Param label="Impact gain" value={e.impactGain} min={0} max={2} step={0.05} onChange={(v) => onChange({ impactGain: v })} format={(v) => v.toFixed(2)} />
       <Param label="Rolling gain" value={e.rollGain} min={0} max={2} step={0.05} onChange={(v) => onChange({ rollGain: v })} format={(v) => v.toFixed(2)} />
       <Param label="Pitch" value={e.pitch} min={0.3} max={3} step={0.05} onChange={(v) => onChange({ pitch: v })} format={(v) => `×${v.toFixed(2)}`} />
@@ -308,8 +293,8 @@ function CritterParams({ e, onChange }: { e: CritterConfig; onChange: (p: Partia
       <Param label="Count" value={e.count} min={1} max={12} onChange={(v) => onChange({ count: v })} />
       <Param label="Size (cm)" value={e.radius} min={0.2} max={1.5} step={0.05} onChange={(v) => onChange({ radius: v })} format={(v) => v.toFixed(2)} />
       <Param label="Walk speed" value={e.speed} min={0.5} max={15} step={0.5} onChange={(v) => onChange({ speed: v })} format={(v) => `${v} cm/s`} />
-      <Param label="Steps / s" value={e.stepRate} min={1} max={25} step={0.5} onChange={(v) => onChange({ stepRate: v })} />
-      <Param label="Hop chance" value={e.hopChance} min={0} max={2} step={0.05} onChange={(v) => onChange({ hopChance: v })} format={(v) => v.toFixed(2)} />
+      <Param label="Base steps / s" value={e.stepRate} min={1} max={25} step={0.5} onChange={(v) => onChange({ stepRate: v })} />
+      <Param label="Hop on arrival" value={e.hopChance} min={0} max={1} step={0.05} onChange={(v) => onChange({ hopChance: v })} format={(v) => v.toFixed(2)} />
       <Param label="Step gain" value={e.stepGain} min={0} max={2} step={0.05} onChange={(v) => onChange({ stepGain: v })} format={(v) => v.toFixed(2)} />
       <Param label="Landing gain" value={e.landGain} min={0} max={2} step={0.05} onChange={(v) => onChange({ landGain: v })} format={(v) => v.toFixed(2)} />
       <Param label="Pitch" value={e.pitch} min={0.3} max={3} step={0.05} onChange={(v) => onChange({ pitch: v })} format={(v) => `×${v.toFixed(2)}`} />
@@ -360,7 +345,7 @@ function draw(c: HTMLCanvasElement | null, sim: SceneSim, inp: SimInputs) {
   const grdL = g.createLinearGradient(b.x, 0, b.x + b.w, 0)
   grdL.addColorStop(0, `rgba(90,169,255,${0.08 + hapticEngine.meter.l * 0.5})`)
   grdL.addColorStop(0.5, 'rgba(0,0,0,0)')
-  grdL.addColorStop(1, `rgba(255,122,156,${0.08 + hapticEngine.meter.r * 0.5})`)
+  grdL.addColorStop(1, `rgba(143,209,79,${0.08 + hapticEngine.meter.r * 0.5})`)
   g.fillStyle = grdL
   g.fillRect(b.x, b.y, b.w, b.h)
 
@@ -381,17 +366,25 @@ function draw(c: HTMLCanvasElement | null, sim: SceneSim, inp: SimInputs) {
     const x = b.x + body.x * b.scale
     const y = b.y + body.y * b.scale
     const r = body.r * b.scale
+    const lift = body.air > 0 ? Math.sin((1 - body.air / Math.max(0.01, body.airTotal)) * Math.PI) : 0
     if (body.cfg.kind === 'marble') {
-      const grd = g.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r)
+      // higher flights rise further off the floor
+      const yy = y - lift * r * (1 + body.airTotal * 6)
+      if (lift > 0) {
+        g.fillStyle = 'rgba(0,0,0,0.35)'
+        g.beginPath()
+        g.ellipse(x, y + r * 0.6, r * (1 - lift * 0.3), r * 0.4, 0, 0, Math.PI * 2)
+        g.fill()
+      }
+      const grd = g.createRadialGradient(x - r * 0.35, yy - r * 0.35, r * 0.1, x, yy, r)
       grd.addColorStop(0, '#ffffff')
       grd.addColorStop(0.3, body.cfg.color)
       grd.addColorStop(1, '#00000088')
       g.fillStyle = grd
       g.beginPath()
-      g.arc(x, y, r, 0, Math.PI * 2)
+      g.arc(x, yy, r * (1 + lift * 0.2), 0, Math.PI * 2)
       g.fill()
     } else {
-      const lift = body.air > 0 ? Math.sin((1 - body.air / Math.max(0.01, body.airTotal)) * Math.PI) : 0
       // shadow
       g.fillStyle = 'rgba(0,0,0,0.35)'
       g.beginPath()

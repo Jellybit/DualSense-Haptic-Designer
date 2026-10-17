@@ -45,10 +45,12 @@ export interface Clip {
   /** seconds */
   start: number
   duration: number
-  /** 0..1 */
+  /** 0..3: above 1 drives the clip into soft saturation */
   gain: number
   attack: number
   release: number
+  /** release fade shape: 1 = straight line, higher = drops fast then trails off (missing = 1) */
+  releaseCurve?: number
   /** pan automation (-1 left grip .. 1 right grip) */
   panStart: number
   panEnd: number
@@ -68,6 +70,8 @@ export interface HapticProject {
   version: 1
   name: string
   duration: number
+  /** scale the whole mix so its loudest point is full strength (missing = on) */
+  normalize?: boolean
   tracks: { name: string; mute: boolean; solo: boolean }[]
   clips: Clip[]
   triggerKeys: TriggerKey[]
@@ -75,11 +79,22 @@ export interface HapticProject {
 
 export const uid = () => Math.random().toString(36).slice(2, 10)
 
+/** Shortest a project gets (empty = 0 s). It grows to fit its clips and trigger keys and shrinks back when they move or go. */
+export const MIN_DURATION = 0
+
+/** Project length: up to the end of the last clip or trigger key. What you see on the timeline is what plays. */
+export function fitDuration(p: Pick<HapticProject, 'clips' | 'triggerKeys'>): number {
+  let end = MIN_DURATION
+  for (const c of p.clips) end = Math.max(end, c.start + c.duration)
+  for (const k of p.triggerKeys) end = Math.max(end, k.time + 0.05)
+  return Math.round(end * 1000) / 1000
+}
+
 export function newProject(): HapticProject {
   return {
     version: 1,
     name: 'Untitled haptics',
-    duration: 4,
+    duration: MIN_DURATION,
     tracks: [
       { name: 'Track 1', mute: false, solo: false },
       { name: 'Track 2', mute: false, solo: false },
@@ -141,6 +156,14 @@ export const CLIP_PRESETS: { name: string; make: () => Omit<Clip, 'id' | 'track'
     }),
   },
   {
+    name: 'Explosion',
+    make: () => ({
+      // a hard low boom that falls into a long, rough rumble
+      name: 'Explosion', duration: 1.8, gain: 3, attack: 0, release: 1.75, releaseCurve: 3, panStart: 0, panEnd: 0,
+      source: { kind: 'noise', freqStart: 110, freqEnd: 28, q: 0.7, amRate: 7, amDepth: 0.45 },
+    }),
+  },
+  {
     name: 'Buzz',
     make: () => ({
       name: 'Buzz', duration: 0.5, gain: 0.5, attack: 0.01, release: 0.05, panStart: 0, panEnd: 0,
@@ -172,7 +195,7 @@ export function renderClip(c: Clip, L: Float32Array, R: Float32Array, sr = SAMPL
   const env = (i: number) => {
     const t = i / sr
     const a = c.attack > 0 ? Math.min(1, t / c.attack) : 1
-    const r = c.release > 0 ? Math.min(1, (c.duration - t) / c.release) : 1
+    const r = c.release > 0 ? Math.pow(Math.max(0, Math.min(1, (c.duration - t) / c.release)), c.releaseCurve ?? 1) : 1
     // 1.5 ms anti-click fades
     const edge = Math.min(1, i / (0.0015 * sr), (n - i) / (0.0015 * sr))
     return Math.max(0, a * r * edge) * c.gain
@@ -239,7 +262,8 @@ export function renderClip(c: Clip, L: Float32Array, R: Float32Array, sr = SAMPL
               ? thumpGrain(a, pan, 110 * s.pitch)
               : impactGrain(s.material, a, pan, s.pitch)
         grains.push({ at, g: mk(amp) })
-        if (s.doublet) grains.push({ at: at + Math.round(0.18 * sr), g: mk(amp * 0.7) })
+        // the second beat only if it still starts inside the clip
+        if (s.doublet && at + Math.round(0.18 * sr) < n) grains.push({ at: at + Math.round(0.18 * sr), g: mk(amp * 0.7) })
       }
     }
     const tmpL = new Float32Array(n + sr) // allow tails
@@ -288,9 +312,25 @@ export function renderProject(p: HapticProject, sr = SAMPLE_RATE): { L: Float32A
     if (!tr || tr.mute || (anySolo && !tr.solo)) return
     renderClip(c, L, R, sr, idx + 1)
   })
+  let peak = 0
   for (let i = 0; i < n; i++) {
     L[i] = softClip(L[i])
     R[i] = softClip(R[i])
+    peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]))
+  }
+  // a grain still ringing when the project ends fades out over 5 ms instead of clicking off
+  const fade = Math.min(n, Math.round(0.005 * sr))
+  for (let i = 0; i < fade; i++) {
+    const k = n - 1 - i
+    L[k] *= i / fade
+    R[k] *= i / fade
+  }
+  if (p.normalize !== false && peak > 1e-4) {
+    const g = 0.99 / peak
+    for (let i = 0; i < n; i++) {
+      L[i] *= g
+      R[i] *= g
+    }
   }
   return { L, R }
 }

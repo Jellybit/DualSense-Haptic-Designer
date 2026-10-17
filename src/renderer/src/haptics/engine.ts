@@ -238,7 +238,7 @@ export class HapticEngine {
     return () => this.endedListeners.delete(fn)
   }
 
-  /** Receive the synth's output in 1024-sample blocks (for recording / BT streaming). */
+  /** Receive the synth's output in 1024-sample blocks (for BT streaming). */
   onBlock(fn: BlockListener) {
     this.tapListeners.add(fn)
     if (this.tapListeners.size === 1) this.post({ t: 'tap', on: true })
@@ -251,39 +251,3 @@ export class HapticEngine {
 
 export const hapticEngine = new HapticEngine()
 
-/** Records the engine output into a growing stereo buffer. */
-export class Recorder {
-  private chunksL: Float32Array[] = []
-  private chunksR: Float32Array[] = []
-  private off: (() => void) | null = null
-  length = 0
-
-  start(engine: HapticEngine) {
-    this.chunksL = []
-    this.chunksR = []
-    this.length = 0
-    this.off = engine.onBlock((L, R) => {
-      this.chunksL.push(L)
-      this.chunksR.push(R)
-      this.length += L.length
-    })
-  }
-
-  get recording() {
-    return !!this.off
-  }
-
-  stop(): { L: Float32Array; R: Float32Array } {
-    this.off?.()
-    this.off = null
-    const L = new Float32Array(this.length)
-    const R = new Float32Array(this.length)
-    let o = 0
-    for (let i = 0; i < this.chunksL.length; i++) {
-      L.set(this.chunksL[i], o)
-      R.set(this.chunksR[i], o)
-      o += this.chunksL[i].length
-    }
-    return { L, R }
-  }
-}

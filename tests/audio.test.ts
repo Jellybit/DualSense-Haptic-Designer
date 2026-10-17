@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { decodeWav, encodeWav, encodeWavChannels, hapticChannels, resample } from '../src/renderer/src/export/wav'
 import { GrainVoice, panGains, rng, SAMPLE_RATE } from '../src/renderer/src/haptics/dsp'
 import { HapticMixer } from '../src/renderer/src/haptics/mixer'
-import { CLIP_PRESETS, newProject, renderProject, uid } from '../src/renderer/src/designer/clips/model'
+import { CLIP_PRESETS, fitDuration, newProject, renderProject, uid } from '../src/renderer/src/designer/clips/model'
 import { Madgwick, rotateWorldToSensor } from '../src/renderer/src/orientation/madgwick'
 import { SceneSim, SCENE_PRESETS } from '../src/renderer/src/designer/scenes/sim'
 
@@ -110,7 +110,7 @@ describe('scene sim', () => {
       grain: (g) => grains.push(g.pan),
       voice: (id, p) => (p ? voices.add(id) : voices.delete(id)),
     })
-    for (let i = 0; i < 240; i++) sim.step(1 / 60, { gx: -0.5, gy: 0, shake: 0, finger: null, jump: false, kick: false })
+    for (let i = 0; i < 240; i++) sim.step(1 / 60, { gx: -0.5, gy: 0, shake: 0, finger: null, jump: false, kick: false, lift: 0 })
     // everything ended up near the left wall
     for (const b of sim.bodies) expect(b.x).toBeLessThan(sim.cfg.width / 2)
     // impacts happened and were panned to the left
@@ -118,10 +118,44 @@ describe('scene sim', () => {
     expect(grains.filter((p) => p < 0).length).toBeGreaterThan(grains.length / 2)
   })
 
-  it('critters walk and emit footsteps', () => {
+  it('critters walk, emit footsteps and stop now and then', () => {
     let steps = 0
     const sim = new SceneSim(SCENE_PRESETS[1].make(), { grain: () => steps++, voice: () => {} })
-    for (let i = 0; i < 120; i++) sim.step(1 / 60, { gx: 0, gy: 0, shake: 0, finger: null, jump: false, kick: false })
-    expect(steps).toBeGreaterThan(10)
+    // longest run of frames with no footstep: they should stand still sometimes
+    let quiet = 0
+    let longestQuiet = 0
+    for (let i = 0; i < 1200; i++) {
+      const before = steps
+      sim.step(1 / 60, { gx: 0, gy: 0, shake: 0, finger: null, jump: false, kick: false, lift: 0 })
+      quiet = steps === before ? quiet + 1 : 0
+      longestQuiet = Math.max(longestQuiet, quiet)
+    }
+    expect(steps).toBeGreaterThan(40)
+    expect(longestQuiet).toBeGreaterThan(30)
+  })
+
+  it('a quick lift tosses marbles, which land with a hit', () => {
+    let hits = 0
+    const sim = new SceneSim(SCENE_PRESETS[2].make(), { grain: () => hits++, voice: () => {} })
+    const still = { gx: 0, gy: 0, shake: 0, finger: null, jump: false, kick: false, lift: 0 }
+    for (let i = 0; i < 60; i++) sim.step(1 / 60, still)
+    hits = 0
+    sim.step(1 / 60, { ...still, lift: 1.2 })
+    expect(sim.bodies[0].air).toBeGreaterThan(0)
+    for (let i = 0; i < 90; i++) sim.step(1 / 60, still)
+    expect(sim.bodies[0].air).toBe(0)
+    expect(hits).toBeGreaterThan(0)
+  })
+})
+
+describe('clip project length', () => {
+  it('starts empty at 0 s, grows to fit the last clip and shrinks back when it goes', () => {
+    const p = newProject()
+    expect(p.duration).toBe(0)
+    const boom = { ...CLIP_PRESETS.find((c) => c.name === 'Explosion')!.make(), id: uid(), track: 0, start: 0.7 }
+    p.clips.push(boom)
+    expect(fitDuration(p)).toBeCloseTo(0.7 + boom.duration, 3)
+    p.clips = []
+    expect(fitDuration(p)).toBe(0)
   })
 })

@@ -11,7 +11,7 @@
   --warn: #ffb347;
   --bad: #ff5a6e;
   --left: #5aa9ff;
-  --right: #ff7a9c;
+  --right: #8fd14f;
   font-family: 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
   color: var(--text);
@@ -242,6 +242,29 @@ input[type='color'] {
 }
 .param label {
   color: var(--muted);
+}
+/* "Clips" warning next to a motor's Gain */
+.clip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  color: var(--bad);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+.clip-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bad);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 .param .val {
   text-align: right;

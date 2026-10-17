@@ -5,20 +5,25 @@ import { platform } from '../../platform'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { hapticEngine } from '../../haptics/engine'
 import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
-import { decodeWav, encodeWav, hapticChannels, resample, type WavLayout } from '../../export/wav'
+import { decodeWav, encodeWav, hapticChannels, resample } from '../../export/wav'
 import { encodeTrigger, EFFECT_LABELS } from '../../device/triggerEffects'
 import { loadLocal, PressTracker, saveLocal, useConnection } from '../../store'
 import { dualSense } from '../../device/hid'
 import { Card, downloadName, Param, Select } from '../../ui/controls'
 import { applyTrigger, releaseTriggers, triggerState } from '../triggers/TriggerPanel'
-import { CLIP_PRESETS, newProject, renderProject, uid, type Clip, type ClipSource, type HapticProject, type TriggerKey } from './model'
+import { CLIP_PRESETS, fitDuration, newProject, renderProject, uid, type Clip, type ClipSource, type HapticProject, type TriggerKey } from './model'
 
 const PX_PER_SEC_DEFAULT = 160
 const PLAY_ID = 'timeline'
+/** empty room shown past the end, to drop or drag clips into */
+const HEADROOM_S = 3
 const MATERIALS: Material[] = ['wood', 'glass', 'metal', 'rubber', 'stone', 'soft']
 
 export function ClipsPanel() {
-  const [project, setProjectState] = useState<HapticProject>(() => loadLocal('dshd.project', newProject()))
+  const [project, setProjectState] = useState<HapticProject>(() => {
+    const p = loadLocal('dshd.project', newProject())
+    return { ...p, duration: fitDuration(p) }
+  })
   const [sel, setSel] = useState<string | null>(null)
   const [selKey, setSelKey] = useState<string | null>(null)
   const [pps, setPps] = useState(PX_PER_SEC_DEFAULT)
@@ -30,9 +35,11 @@ export function ClipsPanel() {
   const playStart = useRef<{ ctxTime: number; from: number } | null>(null)
   const firedKeys = useRef(new Set<string>())
 
+  // the length always follows the content: never set it by hand
   const setProject = (p: HapticProject) => {
-    setProjectState(p)
-    saveLocal('dshd.project', p)
+    const fitted = { ...p, duration: fitDuration(p) }
+    setProjectState(fitted)
+    saveLocal('dshd.project', fitted)
   }
   const updateClip = (id: string, patch: Partial<Clip>) => setProject({ ...project, clips: project.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
   const updateSource = (id: string, patch: Partial<ClipSource>) =>
@@ -44,6 +51,10 @@ export function ClipsPanel() {
 
   // Playback ------------------------------------------------------------------
   const play = (from = playhead) => {
+    // an empty project is 0 s long: nothing to play
+    if (!project.clips.length && !project.triggerKeys.length) return
+    // the project may have shrunk out from under the playhead
+    from = Math.min(from, project.duration)
     const off = Math.round(from * SAMPLE_RATE)
     hapticEngine.play(PLAY_ID, rendered.L, rendered.R, off, loop)
     playStart.current = { ctxTime: hapticEngine.ctx?.currentTime ?? 0, from }
@@ -142,8 +153,7 @@ export function ClipsPanel() {
     const base = CLIP_PRESETS[i].make()
     const track = selected?.track ?? 0
     const clip: Clip = { ...base, id: uid(), track, start: Math.round(playhead * 100) / 100 }
-    const duration = Math.max(project.duration, clip.start + clip.duration)
-    setProject({ ...project, duration, clips: [...project.clips, clip] })
+    setProject({ ...project, clips: [...project.clips, clip] })
     setSel(clip.id)
   }
 
@@ -177,7 +187,7 @@ export function ClipsPanel() {
         panEnd: 0,
         source: { kind: 'sample', name, L: Array.from(l, (v) => Math.round(v * 10000) / 10000), R: Array.from(r, (v) => Math.round(v * 10000) / 10000) },
       }
-      setProject({ ...project, duration: Math.max(project.duration, clip.start + clip.duration), clips: [...project.clips, clip] })
+      setProject({ ...project, clips: [...project.clips, clip] })
       setSel(clip.id)
       setMsg(`Imported ${name}: ${info}`)
     } catch (e) {
@@ -190,9 +200,9 @@ export function ClipsPanel() {
     if (f) await importSound(f.name, f.data, selected?.track ?? 0, Math.round(playhead * 100) / 100)
   }
 
-  const exportWav = async (layout: WavLayout) => {
-    const bytes = encodeWav(rendered.L, rendered.R, SAMPLE_RATE, layout)
-    const path = await platform.saveFile(downloadName(`${project.name}${layout === 'quad' ? '-4ch' : ''}`, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], bytes)
+  const exportWav = async () => {
+    const bytes = encodeWav(rendered.L, rendered.R, SAMPLE_RATE, 'stereo')
+    const path = await platform.saveFile(downloadName(project.name, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], bytes)
     if (!path) return
     let extra = ''
     if (project.triggerKeys.length) {
@@ -250,7 +260,10 @@ export function ClipsPanel() {
         <span className="mono">{playhead.toFixed(2)}s</span>
         <input type="text" value={project.name} onChange={(e) => setProject({ ...project, name: e.target.value })} style={{ width: 180 }} />
         <span className="muted">Length</span>
-        <input type="number" step={0.5} min={0.1} value={project.duration} onChange={(e) => setProject({ ...project, duration: Math.max(0.1, Number(e.target.value)) })} />
+        <span className="mono" title="Fits the clips and trigger keys">{project.duration.toFixed(2)}s</span>
+        <label className="row" title="Scale the whole mix so its loudest point is full strength (playback and export)">
+          <input type="checkbox" checked={project.normalize !== false} onChange={(e) => setProject({ ...project, normalize: e.target.checked })} /> Normalize
+        </label>
         <span className="muted">Zoom</span>
         <input type="range" min={40} max={600} value={pps} onChange={(e) => setPps(Number(e.target.value))} />
         <div className="spacer" />
@@ -268,8 +281,8 @@ export function ClipsPanel() {
         ))}
         <button onClick={() => void importWav()} title="Import a sound file as a clip (or drop a file onto a track)">Sound…</button>
         <span className="muted" style={{ marginLeft: 8 }}>Trigger key at playhead:</span>
-        <button onClick={() => addTriggerKey('L')} title="Uses the current L2 effect from the Adaptive Triggers tab">+L2</button>
-        <button onClick={() => addTriggerKey('R')} title="Uses the current R2 effect from the Adaptive Triggers tab">+R2</button>
+        <button onClick={() => addTriggerKey('L')} title="Uses the current L2 effect from Haptics & Triggers">+L2</button>
+        <button onClick={() => addTriggerKey('R')} title="Uses the current R2 effect from Haptics & Triggers">+R2</button>
       </div>
 
       <Timeline
@@ -295,12 +308,11 @@ export function ClipsPanel() {
       <Waveform L={rendered.L} R={rendered.R} playhead={playhead} duration={project.duration} />
 
       <div className="row" style={{ margin: '10px 0' }}>
-        <button className="primary" onClick={() => void exportWav('stereo')}>Export WAV (stereo L/R)</button>
-        <button onClick={() => void exportWav('quad')}>Export WAV (4-ch, haptics on 3/4)</button>
+        <button className="primary" onClick={() => void exportWav()}>Export Haptics WAV (stereo L/R)</button>
         {msg && <span className="muted small">{msg}</span>}
       </div>
 
-      {selected && <ClipInspector clip={selected} onChange={(p) => updateClip(selected.id, p)} onSource={(p) => updateSource(selected.id, p)} onDelete={() => { setProject({ ...project, clips: project.clips.filter((c) => c.id !== selected.id) }); setSel(null) }} onDuplicate={() => { const c = { ...structuredClone(selected), id: uid(), start: selected.start + selected.duration }; setProject({ ...project, duration: Math.max(project.duration, c.start + c.duration), clips: [...project.clips, c] }); setSel(c.id) }} />}
+      {selected && <ClipInspector clip={selected} onChange={(p) => updateClip(selected.id, p)} onSource={(p) => updateSource(selected.id, p)} onDelete={() => { setProject({ ...project, clips: project.clips.filter((c) => c.id !== selected.id) }); setSel(null) }} onDuplicate={() => { const c = { ...structuredClone(selected), id: uid(), start: selected.start + selected.duration }; setProject({ ...project, clips: [...project.clips, c] }); setSel(c.id) }} />}
       {selectedKey && (
         <Card title={`Trigger key · ${selectedKey.side}2`} right={<button className="danger" onClick={() => { setProject({ ...project, triggerKeys: project.triggerKeys.filter((k) => k.id !== selectedKey.id) }); setSelKey(null) }}>Delete</button>}>
           <div className="row">
@@ -343,6 +355,9 @@ function Timeline(props: {
 }) {
   const { project, pps } = props
   const width = project.duration * pps
+  // lanes run on past the end so clips can be dropped or dragged there; the overhang is shaded
+  const viewW = (project.duration + HEADROOM_S) * pps
+  const pastEnd = `linear-gradient(90deg, transparent ${width}px, rgba(0,0,0,0.3) ${width}px)`
   const lanesRef = useRef<HTMLDivElement>(null)
 
   const drag = (e: React.PointerEvent, clip: Clip, mode: 'move' | 'resize') => {
@@ -417,12 +432,12 @@ function Timeline(props: {
 
   const step = pps > 300 ? 0.1 : pps > 120 ? 0.25 : 0.5
   const ticks = []
-  for (let t = 0; t <= project.duration + 1e-6; t += step) ticks.push(t)
+  for (let t = 0; t <= project.duration + HEADROOM_S + 1e-6; t += step) ticks.push(t)
 
   return (
     <div className="timeline" style={{ overflowX: 'auto' }}>
-      <div style={{ width: width + 120, position: 'relative' }}>
-        <div className="tl-ruler" style={{ width }} onMouseDown={seekFrom}>
+      <div style={{ width: viewW + 120, position: 'relative' }}>
+        <div className="tl-ruler" style={{ width: viewW, backgroundImage: pastEnd }} onMouseDown={seekFrom}>
           {ticks.map((t) => (
             <div key={t} className="tl-tick" style={{ left: t * pps }}>
               {Math.abs(t - Math.round(t)) < 1e-6 ? `${Math.round(t)}s` : ''}
@@ -439,7 +454,7 @@ function Timeline(props: {
                   <button className={tr.solo ? 'active' : ''} onClick={() => props.onTrack(i, { solo: !tr.solo })}>S</button>
                 </div>
               </div>
-              <div className={`tl-lane ${dropTrack === i ? 'drop' : ''}`} style={{ width }} onMouseDown={seekFrom} {...dropProps(i)}>
+              <div className={`tl-lane ${dropTrack === i ? 'drop' : ''}`} style={{ width: viewW, backgroundImage: pastEnd }} onMouseDown={seekFrom} {...dropProps(i)}>
                 {project.clips
                   .filter((c) => c.track === i)
                   .map((c) => (
@@ -461,7 +476,7 @@ function Timeline(props: {
           ))}
           <div className="tl-track" style={{ height: 26 }}>
             <div className="tl-head small muted">Triggers</div>
-            <div className="tl-lane" style={{ width }} onMouseDown={seekFrom}>
+            <div className="tl-lane" style={{ width: viewW, backgroundImage: pastEnd }} onMouseDown={seekFrom}>
               {project.triggerKeys.map((k) => (
                 <div
                   key={k.id}
@@ -484,11 +499,11 @@ function Timeline(props: {
   )
 }
 
-/** Clip colour shows its pan: blue = left grip, pink = right grip. */
+/** Clip colour shows its pan: blue = left grip, green = right grip. */
 function panColor(c: Clip) {
   const p = (c.panStart + c.panEnd) / 2
   const l = [52, 100, 180]
-  const r = [180, 70, 120]
+  const r = [70, 140, 50]
   const t = (p + 1) / 2
   const mix = l.map((v, i) => Math.round(v + (r[i] - v) * t))
   return `linear-gradient(90deg, rgb(${l.map((v, i) => Math.round(v + (r[i] - v) * ((c.panStart + 1) / 2))).join(',')}), rgb(${l.map((v, i) => Math.round(v + (r[i] - v) * ((c.panEnd + 1) / 2))).join(',')})), rgb(${mix.join(',')})`
@@ -521,12 +536,12 @@ export function Waveform({ L, R, playhead, duration }: { L: Float32Array; R: Flo
       }
     }
     drawCh(L, 2, H / 2 - 4, '#5aa9ff')
-    drawCh(R, H / 2 + 2, H / 2 - 4, '#ff7a9c')
+    drawCh(R, H / 2 + 2, H / 2 - 4, '#8fd14f')
     g.fillStyle = '#8b91a1'
     g.font = '10px Segoe UI'
     g.fillText('L actuator', 4, 12)
     g.fillText('R actuator', 4, H / 2 + 12)
-    const x = (playhead / duration) * W
+    const x = duration > 0 ? (playhead / duration) * W : 0
     g.fillStyle = '#3ad6a8'
     g.fillRect(x, 0, 2, H)
   }, [L, R, playhead, duration])
@@ -555,9 +570,10 @@ function ClipInspector({ clip, onChange, onSource, onDelete, onDuplicate }: { cl
           </div>
           <Param label="Start (s)" value={clip.start} min={0} max={30} step={0.01} onChange={(v) => onChange({ start: v })} format={(v) => v.toFixed(2)} />
           <Param label="Duration (s)" value={clip.duration} min={0.02} max={10} step={0.01} onChange={(v) => onChange({ duration: v })} format={(v) => v.toFixed(2)} />
-          <Param label="Gain" value={clip.gain} min={0} max={1.5} step={0.01} onChange={(v) => onChange({ gain: v })} format={(v) => v.toFixed(2)} />
+          <Param label="Gain" value={clip.gain} min={0} max={3} step={0.01} onChange={(v) => onChange({ gain: v })} format={(v) => v.toFixed(2)} />
           <Param label="Attack (s)" value={clip.attack} min={0} max={2} step={0.01} onChange={(v) => onChange({ attack: v })} format={(v) => v.toFixed(2)} />
           <Param label="Release (s)" value={clip.release} min={0} max={2} step={0.01} onChange={(v) => onChange({ release: v })} format={(v) => v.toFixed(2)} />
+          <Param label="Release curve" value={clip.releaseCurve ?? 1} min={1} max={5} step={0.1} onChange={(v) => onChange({ releaseCurve: v })} format={(v) => (v === 1 ? 'linear' : `×${v.toFixed(1)}`)} />
           <Param label="Pan start (L↔R)" value={clip.panStart} min={-1} max={1} step={0.05} onChange={(v) => onChange({ panStart: v })} format={(v) => v.toFixed(2)} />
           <Param label="Pan end (L↔R)" value={clip.panEnd} min={-1} max={1} step={0.05} onChange={(v) => onChange({ panEnd: v })} format={(v) => v.toFixed(2)} />
         </div>

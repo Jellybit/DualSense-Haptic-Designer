@@ -23,7 +23,7 @@ const KEYS: Record<ResetSection, string[]> = {
     'dshd.workbench.file',
   ],
   trigger: ['dshd.trig.L2', 'dshd.trig.R2'],
-  scene: ['dshd.scene'],
+  scene: ['dshd.scene', 'dshd.scene.master'],
 }
 
 const listeners = new Set<(s: ResetSection) => void>()

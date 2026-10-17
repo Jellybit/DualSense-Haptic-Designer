@@ -62,6 +62,7 @@ export class LiquidSim {
   // accumulated wall impacts during a frame: momentum and x-centroid
   private wallHit = [0, 0, 0, 0]
   private wallHitX = [0, 0, 0, 0]
+  private wallHitY = [0, 0, 0, 0]
   /** slow average of wall momentum: steady pressure of resting water, not a splash */
   private wallAvg = [0, 0, 0, 0]
   // stats for the haptic voices
@@ -269,20 +270,20 @@ export class LiquidSim {
       let vx = (this.x[i] - this.px[i]) / dt
       let vy = (this.y[i] - this.py[i]) / dt
       if (this.x[i] < pad) {
-        this.hit(0, -vx, this.x[i])
+        this.hit(0, -vx, this.x[i], this.y[i])
         this.x[i] = pad
         vx = Math.abs(vx) * 0.1
       } else if (this.x[i] > W - pad) {
-        this.hit(1, vx, this.x[i])
+        this.hit(1, vx, this.x[i], this.y[i])
         this.x[i] = W - pad
         vx = -Math.abs(vx) * 0.1
       }
       if (this.y[i] < pad) {
-        this.hit(2, -vy, this.x[i])
+        this.hit(2, -vy, this.x[i], this.y[i])
         this.y[i] = pad
         vy = Math.abs(vy) * 0.1
       } else if (this.y[i] > Hh - pad) {
-        this.hit(3, vy, this.x[i])
+        this.hit(3, vy, this.x[i], this.y[i])
         this.y[i] = Hh - pad
         vy = -Math.abs(vy) * 0.1
       }
@@ -328,14 +329,16 @@ export class LiquidSim {
     }
   }
 
-  private hit(side: number, speed: number, x: number) {
+  private hit(side: number, speed: number, x: number, y: number) {
     if (speed <= 0) return
     this.wallHit[side] += speed
     this.wallHitX[side] += speed * x
+    this.wallHitY[side] += speed * y
   }
 
   /** Emit haptics for the frame (call once per rendered frame, after the substeps). */
-  emit(sink: LiquidSink, width: number, frameDt: number) {
+  /** depth: y (cm) → loudness, so splashes and sloshing near the top wall feel softer */
+  emit(sink: LiquidSink, width: number, frameDt: number, depth: (y: number) => number = () => 1) {
     const n = this.n
     const gain = this.params.gain
     const visc = this.params.viscosity
@@ -346,8 +349,10 @@ export class LiquidSim {
     for (let side = 0; side < 4; side++) {
       const m = this.wallHit[side]
       const x = m > 0 ? this.wallHitX[side] / m : 0
+      const y = m > 0 ? this.wallHitY[side] / m : 0
       this.wallHit[side] = 0
       this.wallHitX[side] = 0
+      this.wallHitY[side] = 0
       // splash = onset: momentum well above the steady pressure of water resting on the wall
       const avg = this.wallAvg[side]
       this.wallAvg[side] = avg * 0.85 + m * 0.15
@@ -357,7 +362,7 @@ export class LiquidSim {
       if (strength < 8 || this.time - this.lastSplash[side] < 0.12) continue
       this.lastSplash[side] = this.time
       this.flash[side] = Math.min(1, strength / 40)
-      const amp = Math.min(1, Math.pow(strength / 45, 0.8)) * gain * (1 - visc * 0.5)
+      const amp = Math.min(1, Math.pow(strength / 45, 0.8)) * gain * (1 - visc * 0.5) * depth(y)
       const p = side === 0 ? -1 : side === 1 ? 1 : pan(x)
       // a wet thump: low body + a lot of filtered noise, slower decay for syrup
       sink.grain({ freq: 75 - visc * 20, freqEnd: 45, duration: 0.22 + visc * 0.15, attack: 0.008, decay: 0.05 + visc * 0.05, amp, pan: p, noise: 0.6 })
@@ -366,15 +371,18 @@ export class LiquidSim {
     // Slosh: kinetic energy and momentum-weighted position
     let ke = 0
     let wx = 0
+    let wy = 0
     for (let i = 0; i < n; i++) {
       const v2 = this.vx[i] * this.vx[i] + this.vy[i] * this.vy[i]
       ke += v2
       wx += v2 * this.x[i]
+      wy += v2 * this.y[i]
     }
     const meanSpeed = n ? Math.sqrt(ke / n) : 0
     const centre = ke > 1e-6 ? wx / ke : width / 2
+    const loud = ke > 1e-6 ? depth(wy / ke) : 1
     const fill = 0.4 + Math.min(1, this.params.amount) * 0.6
-    const sloshAmp = Math.min(1, meanSpeed / 35) * gain * fill
+    const sloshAmp = Math.min(1, meanSpeed / 35) * gain * fill * loud
     const sloshKey = `slosh:${this.id}`
     if (sloshAmp > 0.01) {
       sink.voice(sloshKey, {
@@ -389,7 +397,7 @@ export class LiquidSim {
     } else sink.voice(sloshKey, null)
 
     // Churn: turbulence → brighter, bubbly texture (water only; syrup barely churns)
-    const churnAmp = Math.min(1, this.turbulence / 18) * gain * 0.55 * (1 - visc * 0.8)
+    const churnAmp = Math.min(1, this.turbulence / 18) * gain * 0.55 * (1 - visc * 0.8) * loud
     const churnKey = `churn:${this.id}`
     if (churnAmp > 0.01) {
       sink.voice(churnKey, {

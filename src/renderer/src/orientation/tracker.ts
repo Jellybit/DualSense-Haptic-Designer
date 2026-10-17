@@ -43,6 +43,7 @@ export class OrientationTracker {
   private stillTime = 0
   /** smoothed linear acceleration magnitude, used to detect shakes */
   shake = 0
+  private liftPeak = 0
 
   reset() {
     this.filter.reset()
@@ -96,6 +97,18 @@ export class OrientationTracker {
     }
     const g: [number, number, number] = [gRaw[0] - this.bias[0], gRaw[1] - this.bias[1], gRaw[2] - this.bias[2]]
     this.filter.update(g, a, dt)
+
+    // Upward acceleration beyond gravity: at rest the accelerometer reads 1 g opposite "down"
+    const down = this.gravityInController
+    const up = -(a[0] * down[0] + a[1] * down[1] + a[2] * down[2]) - 1
+    this.liftPeak = Math.max(this.liftPeak, up)
+  }
+
+  /** Peak upward acceleration (g beyond gravity) since the last call; samples arrive faster than frames. */
+  takeLift() {
+    const v = this.liftPeak
+    this.liftPeak = 0
+    return v
   }
 
   /** Orientation relative to the recentered pose. */

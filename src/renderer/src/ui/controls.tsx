@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 export function Param(props: {
-  label: string
+  label: ReactNode
   value: number
   min: number
   max: number
