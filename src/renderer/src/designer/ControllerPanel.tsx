@@ -5,7 +5,7 @@ import { dualSense } from '../device/hid'
 import { BUTTON_NAMES } from '../device/inputReport'
 import { hapticEngine } from '../haptics/engine'
 import { impactGrain } from '../haptics/dsp'
-import { lightbar, loadLocal, saveLocal, tracker, useConnection, useTicker } from '../store'
+import { lightbar, loadLocal, recenter, saveLocal, tracker, useConnection, useTicker } from '../store'
 import { DEFAULT_AXIS_MAP, type AxisSel } from '../orientation/tracker'
 import { Card, Param } from '../ui/controls'
 import type { LoadedModel } from '../viewer/ControllerView'
@@ -105,7 +105,7 @@ function ImuCard() {
       title="Motion (IMU)"
       right={
         <>
-          <button onClick={() => tracker.recenter()}>Recenter</button>
+          <button onClick={() => recenter('Recenter')}>Recenter</button>
           <button onClick={() => tracker.reset()}>Reset</button>
         </>
       }

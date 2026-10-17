@@ -174,6 +174,29 @@ input[type='color'] {
   height: auto;
   min-height: 200px;
 }
+/* what a controller button just did, floating over the top of the 3D view */
+.button-hint-anchor {
+  position: relative;
+  height: 0;
+  z-index: 4;
+}
+.button-hint {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(15, 17, 23, 0.85);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  font-size: 13px;
+  pointer-events: none;
+}
+.button-hint.fading {
+  opacity: 0;
+  transition: opacity 0.4s;
+}
 /* simplified motor and trigger graphs above the 3D view */
 .minigraphs {
   display: grid;
@@ -256,6 +279,13 @@ input[type='color'] {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+/* items that wrap to the next line as one group */
+.keep-together {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
 }
 .grid2 {
   display: grid;
@@ -482,19 +512,6 @@ table.rig tr.hit td {
   width: 7px;
   cursor: ew-resize;
   background: rgba(255, 255, 255, 0.15);
-}
-.tl-key {
-  position: absolute;
-  top: 6px;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
-  transform: rotate(45deg);
-  background: var(--warn);
-  cursor: grab;
-}
-.tl-key.sel {
-  outline: 2px solid white;
 }
 .tl-playhead {
   position: absolute;

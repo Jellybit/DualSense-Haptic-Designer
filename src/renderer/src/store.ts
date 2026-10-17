@@ -1,6 +1,7 @@
 // Global live state shared between panels (outside React for 250 Hz input).
 
 import { dualSense } from './device/hid'
+import { platform } from './platform'
 import type { InputState } from './device/inputReport'
 import { DEFAULT_AXIS_MAP, OrientationTracker } from './orientation/tracker'
 import { useEffect, useReducer, useSyncExternalStore } from 'react'
@@ -62,14 +63,65 @@ export function saveLocal(key: string, v: unknown) {
   } catch {
     /* ignore */
   }
+  persistSettings()
+}
+
+// Portable exe: mirror the settings into the file next to the exe (batched, and flushed when
+// the window closes). Values are stored parsed, so the file reads as plain JSON.
+let persistTimer = 0
+function settingsSnapshot() {
+  const out: Record<string, unknown> = {}
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)!
+    const v = localStorage.getItem(k)!
+    try {
+      out[k] = JSON.parse(v)
+    } catch {
+      out[k] = v
+    }
+  }
+  return out
+}
+/** Call after changing localStorage directly (saveLocal already does). */
+export function persistSettings() {
+  if (!platform.saveSettings) return
+  window.clearTimeout(persistTimer)
+  persistTimer = window.setTimeout(() => {
+    persistTimer = 0
+    platform.saveSettings?.(settingsSnapshot())
+  }, 500)
+}
+if (platform.saveSettings)
+  window.addEventListener('beforeunload', () => {
+    if (!persistTimer) return
+    window.clearTimeout(persistTimer)
+    persistTimer = 0
+    platform.saveSettings?.(settingsSnapshot(), true)
+  })
+
+// Short notes over the 3D view saying what a controller button just did ("✕ - Vibration Only")
+const hintListeners = new Set<(text: string) => void>()
+export function showButtonHint(text: string) {
+  hintListeners.forEach((fn) => fn(text))
+}
+export function onButtonHint(fn: (text: string) => void): () => void {
+  hintListeners.add(fn)
+  return () => hintListeners.delete(fn)
 }
 
 // Options, Create, L3 or R3 on the controller recenters the 3D view (not PS: it's often taken by Steam)
 const RECENTER_BUTTONS = ['options', 'create', 'l3', 'r3'] as const
+const RECENTER_NAMES: Record<(typeof RECENTER_BUTTONS)[number], string> = { options: 'Options', create: 'Create', l3: 'L3', r3: 'R3' }
 const recenterPresses = new PressTracker()
 dualSense.onInput((s) => {
   tracker.update(s)
   // check every button so each one's edge state stays current
-  const pressed = RECENTER_BUTTONS.map((b) => recenterPresses.pressed(b, s.buttons[b])).some(Boolean)
-  if (pressed) tracker.recenter()
+  const pressed = RECENTER_BUTTONS.filter((b) => recenterPresses.pressed(b, s.buttons[b]))
+  if (pressed.length) recenter(RECENTER_NAMES[pressed[0]])
 })
+
+/** Recenter the 3D view, saying which button did it. */
+export function recenter(button: string) {
+  tracker.recenter()
+  showButtonHint(`${button} - Reset 3D View`)
+}

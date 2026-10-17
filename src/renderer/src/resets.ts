@@ -3,6 +3,7 @@
 // next load. Calibration, the 3D model/rig and audio device choices are never reset here.
 
 import { clearLastSound } from './lastSound'
+import { persistSettings } from './store'
 
 export type ResetSection = 'motor' | 'trigger' | 'scene'
 
@@ -22,7 +23,7 @@ const KEYS: Record<ResetSection, string[]> = {
     'dshd.workbench.playChoice',
     'dshd.workbench.file',
   ],
-  trigger: ['dshd.trig.L2', 'dshd.trig.R2'],
+  trigger: ['dshd.trig.L2', 'dshd.trig.R2', 'dshd.trig.name'],
   scene: ['dshd.scene', 'dshd.scene.master'],
 }
 
@@ -42,6 +43,7 @@ export async function resetSection(s: ResetSection): Promise<void> {
       /* storage unavailable */
     }
   }
+  persistSettings()
   if (s === 'motor') await clearLastSound()
   listeners.forEach((fn) => fn(s))
 }

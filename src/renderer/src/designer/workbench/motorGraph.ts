@@ -1,5 +1,5 @@
 // A grip motor's frequency graph: EQ curve, live spectra and clipping marks. Drawn full-size
-// in each motor card and as a simplified mini above the 3D view.
+// in each motor card and as a simplified mini above the 3D view (where Experiments has no EQ).
 
 import { SAMPLE_RATE } from '../../haptics/dsp'
 import { EQ_BANDS, EqChain, type EqSettings } from '../../haptics/eq'
@@ -41,10 +41,12 @@ export class MotorGraphPainter {
 
   constructor(private ch: number) {}
 
-  /** `mini`: no labels and lighter lines, for the small copy above the 3D view. */
-  draw(c: HTMLCanvasElement, H: number, eq: EqSettings, mot: MotorAnalyser, src: AnalyserNode | null, mini = false) {
-    if (!this.chain) this.chain = new EqChain(curveCtx, eq)
-    this.chain.update(eq)
+  /** `eq` null: no EQ curve (Experiments). `mini`: no labels and lighter lines, for the small copy above the 3D view. */
+  draw(c: HTMLCanvasElement, H: number, eq: EqSettings | null, mot: MotorAnalyser, src: AnalyserNode | null, mini = false) {
+    if (eq) {
+      if (!this.chain) this.chain = new EqChain(curveCtx, eq)
+      this.chain.update(eq)
+    }
     const dpr = window.devicePixelRatio || 1
     const W = c.clientWidth
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
@@ -121,6 +123,7 @@ export class MotorGraphPainter {
     }
 
     // EQ curve
+    if (!eq || !this.chain) return
     const resp = this.chain.response(freqs)
     g.strokeStyle = eq.mute ? '#555' : '#ffb347'
     g.lineWidth = mini ? 1.5 : 2

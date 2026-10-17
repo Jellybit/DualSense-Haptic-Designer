@@ -59,22 +59,39 @@ export function applyTrigger(side: Side, e: TriggerEffect) {
 }
 
 /** Save the current L2/R2 setup as a trigger-preset JSON file. Returns the path or null. */
-export async function exportTriggerJson(baseName: string): Promise<string | null> {
+async function exportTriggerJson(baseName: string): Promise<string | null> {
   const presets = [makePreset(`${baseName} L2`, 'L2', triggerState.L2), makePreset(`${baseName} R2`, 'R2', triggerState.R2)]
-  return platform.saveFile(downloadName(`${baseName}.triggers`, 'json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(presets))
+  return platform.saveFile(downloadName(baseName, 'triggers.json'), [{ name: 'JSON', extensions: ['json'] }], serializePresets(presets))
 }
 
-/** `embedded`: shown inside another panel that provides its own export button. */
-export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
+const DEFAULT_NAME = 'default'
+
+/** The name to show for a loaded file: its presets' name without " L2"/" R2", else the file name. */
+function loadedName(presetNames: string[], fileName: string): string {
+  for (const n of presetNames) {
+    const base = n.replace(/\s*(L2|R2)$/, '').trim()
+    if (base && !/^Preset \d+$/.test(base)) return base
+  }
+  return fileName.replace(/(\.triggers)?\.json$/i, '') || DEFAULT_NAME
+}
+
+export function TriggerPanel() {
   const info = useConnection()
   const [effects, setEffects] = useState(triggerState)
   const [live, setLive] = useState(true)
+  // names the exported file and the presets inside it; an import takes the loaded file's name
+  const [name, setNameState] = useState(() => loadLocal('dshd.trig.name', DEFAULT_NAME))
+  const setName = (n: string) => {
+    setNameState(n)
+    saveLocal('dshd.trig.name', n)
+  }
   useEffect(
     () =>
       onReset((s) => {
         if (s !== 'trigger') return
         setEffects({ ...triggerState })
         setLive(true)
+        setNameState(DEFAULT_NAME)
         setMsg(null)
       }),
     [],
@@ -122,7 +139,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
   }, [live, info, calibrating])
 
   const exportJson = async () => {
-    const path = await exportTriggerJson('triggers')
+    const path = await exportTriggerJson(name.trim() || DEFAULT_NAME)
     if (path) setMsg(`Exported L2 and R2 to ${path}`)
   }
 
@@ -136,6 +153,7 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
       const r2 = list.find((p) => p.trigger === 'R2') ?? list.find((p) => p.trigger === 'both')
       if (l2) setEffect('L2', l2.effect)
       if (r2) setEffect('R2', r2.effect)
+      if (l2 || r2) setName(loadedName([l2, r2].filter((p) => !!p).map((p) => p.name), f.name))
       setMsg(l2 || r2 ? `Loaded ${[l2 && 'L2', r2 && 'R2'].filter(Boolean).join(' and ')} from ${f.name}` : `No trigger effects found in ${f.name}`)
     } catch (e) {
       setMsg(`Import failed: ${e instanceof Error ? e.message : e}`)
@@ -146,6 +164,10 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
     <>
       {!info && <div className="warnbox">Connect a controller to feel the effects. You can still design and export trigger effects.</div>}
       <div className="row" style={{ marginBottom: 10 }}>
+        <span className="keep-together" title="Names the exported file and the L2/R2 presets inside it">
+          <span className="muted">Name</span>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={DEFAULT_NAME} style={{ width: 160 }} />
+        </span>
         <label className="row">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Send changes live
         </label>
@@ -166,11 +188,9 @@ export function TriggerPanel({ embedded = false }: { embedded?: boolean }) {
         </button>
         <div className="spacer" />
         <button onClick={() => void importJson()}>Import JSON…</button>
-        {!embedded && (
-          <button className="primary" onClick={() => void exportJson()}>
-            Export JSON…
-          </button>
-        )}
+        <button className="primary" onClick={() => void exportJson()}>
+          Export JSON…
+        </button>
       </div>
       {msg && <div className="muted small" style={{ marginBottom: 8 }}>{msg}</div>}
       {calibrating && <CalibrationWizard onClose={() => setCalibrating(false)} />}

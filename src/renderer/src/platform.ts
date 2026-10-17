@@ -86,6 +86,8 @@ export const platform: Api = isElectron
       openFile: browserOpen,
       readFile: async () => null,
       assetsDir: async () => '',
+      pathForFile: () => '',
+      saveSettings: null,
     }
 
 /** The bundled controller model: an Electron file path, or bytes fetched from the web build. */

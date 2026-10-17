@@ -31,9 +31,9 @@ import {
   type EqSource,
 } from '../../haptics/eq'
 import { decodeWav, encodeWavChannels, resample } from '../../export/wav'
-import { loadLocal, PressTracker, saveLocal, useConnection } from '../../store'
+import { loadLocal, PressTracker, saveLocal, showButtonHint, useConnection } from '../../store'
 import { Card, downloadName, Param } from '../../ui/controls'
-import { exportTriggerJson, TriggerPanel } from '../triggers/TriggerPanel'
+import { TriggerPanel } from '../triggers/TriggerPanel'
 import { F_MAX, F_MIN, MotorGraphPainter, workbenchLive, type MotorAnalyser } from './motorGraph'
 
 const FACE_BUTTONS = ['cross', 'circle', 'square', 'triangle'] as const
@@ -55,6 +55,13 @@ const BUTTON_TARGET: Record<(typeof FACE_BUTTONS)[number], PlayTarget> = {
   circle: VIBRATION_SPEAKER,
   triangle: PC_ONLY,
   square: VIBRATION_PC,
+}
+/** Shown over the 3D view when a face button plays */
+const BUTTON_HINT: Record<(typeof FACE_BUTTONS)[number], string> = {
+  cross: '✕ - Vibration Only',
+  circle: '○ - Vibration + Controller Audio',
+  triangle: '△ - PC Audio',
+  square: '◻ - Vibration + PC Audio',
 }
 /** What the on-screen Play button plays */
 const PLAY_CHOICES: { label: string; target: PlayTarget }[] = [
@@ -268,7 +275,8 @@ export function WorkbenchPanel() {
     e.preventDefault()
     setDragOver(false)
     const file = e.dataTransfer.files[0]
-    if (file) await load(file.name, new Uint8Array(await file.arrayBuffer()))
+    // the desktop app knows a dropped file's path, so it can reopen it next time
+    if (file) await load(file.name, new Uint8Array(await file.arrayBuffer()), platform.pathForFile(file) || undefined)
   }
 
   // --- live preview through the 4 EQs -----------------------------------------------
@@ -588,7 +596,11 @@ export function WorkbenchPanel() {
       raf = requestAnimationFrame(tick)
       const b = dualSense.state.buttons
       let pressed: PlayTarget | null = null
-      for (const name of FACE_BUTTONS) if (presses.pressed(name, b[name])) pressed = BUTTON_TARGET[name]
+      for (const name of FACE_BUTTONS)
+        if (presses.pressed(name, b[name])) {
+          pressed = BUTTON_TARGET[name]
+          showButtonHint(BUTTON_HINT[name])
+        }
       const anyHeld = FACE_BUTTONS.some((n) => b[n])
       if (pressed) startPreview(pressed)
       if (latest.current.mode === 'hold' && held && !anyHeld) stopPreview()
@@ -658,11 +670,6 @@ export function WorkbenchPanel() {
     setMsg(`Saved ${path} (${layoutText})${peak > 1 ? ` — note: peaks at ${Math.round(peak * 100)}%, lower Vibration Power or some EQ gain to avoid clipping` : ''}`)
   }
 
-  const exportJson = async () => {
-    const path = await exportTriggerJson(baseName)
-    if (path) setMsg(`Saved ${path}`)
-  }
-
   const nCh = audio?.channels.length ?? 2
   // A mono file feeds both motors (L and R read the same channel); the EQs then split it.
   const sourceOptions: { value: EqSource; label: string }[] =
@@ -687,15 +694,15 @@ export function WorkbenchPanel() {
             <button onClick={() => confirmReset(RESET_LABELS.motor) && void resetSection('motor')} title="Both motor EQs, Vibration Power, Normalize and play options back to defaults, and unload the sound">
               {RESET_LABELS.motor}
             </button>
-            <button className="primary" onClick={() => void exportWav('quad')} disabled={!audio} title="Controller's native layout: ch 1/2 silent, motors on ch 3/4. Plays as-is on the controller's sound device.">
-              Export 4-ch WAV…
-            </button>
-            <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. A haptic signal for the grip motors, meant to be felt, not heard. For engines/middleware that route haptics themselves.">
-              Export Haptics-only WAV…
-            </button>
-            <button className="primary" onClick={() => void exportJson()}>
-              Export trigger JSON…
-            </button>
+            {/* the exports wrap onto the next line together */}
+            <span className="keep-together">
+              <button className="primary" onClick={() => void exportWav('quad')} disabled={!audio} title="Controller's native layout: ch 1/2 silent, motors on ch 3/4. Plays as-is on the controller's sound device.">
+                Export 4-ch WAV…
+              </button>
+              <button className="primary" onClick={() => void exportWav('stereo')} disabled={!audio} title="Motors only: left motor, right motor. A haptic signal for the grip motors, meant to be felt, not heard. For engines/middleware that route haptics themselves.">
+                Export Haptics-only WAV…
+              </button>
+            </span>
           </>
         }
       >
@@ -770,15 +777,17 @@ export function WorkbenchPanel() {
               <option value="restart">Play From Start</option>
               <option value="hold">Play When Held</option>
             </select>
-            <span className="muted">PC sound:</span>
-            <select value={pcSink} onChange={(e) => setPcSink(e.target.value)} title="Where PC audio plays the original sound">
-              <option value="">System default output</option>
-              {pcOutputs.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
+            <span className="keep-together">
+              <span className="muted">PC sound:</span>
+              <select value={pcSink} onChange={(e) => setPcSink(e.target.value)} title="Where PC audio plays the original sound">
+                <option value="">System default output</option>
+                {pcOutputs.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </span>
           </div>
           <div className="row" style={{ marginTop: 8 }}>
             <label className="row">
@@ -855,7 +864,7 @@ export function WorkbenchPanel() {
       <h3 className="muted" style={{ margin: '16px 0 8px', fontSize: 13, letterSpacing: 0.6, textTransform: 'uppercase' }}>
         Trigger force feedback
       </h3>
-      <TriggerPanel embedded />
+      <TriggerPanel />
     </>
   )
 }

@@ -1,9 +1,46 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 const SONY_VID = 0x054c
 const DUALSENSE_PIDS = new Set([0x0ce6, 0x0df2])
+
+// Portable exe (electron-builder sets PORTABLE_EXECUTABLE_DIR): the settings live in one file
+// next to the exe, and Chromium's own cache in Temp, so nothing is left in AppData
+const portableDir = process.env['PORTABLE_EXECUTABLE_DIR']
+const settingsFile = portableDir ? join(portableDir, 'DualSense Haptic Designer.settings.json') : null
+if (portableDir) app.setPath('userData', join(app.getPath('temp'), 'DualSense Haptic Designer'))
+
+/** The portable settings (key -> value): {} when the file is missing or unreadable; null when not portable. */
+ipcMain.on('settings:load', (e) => {
+  if (!settingsFile) {
+    e.returnValue = null
+    return
+  }
+  try {
+    const o = JSON.parse(readFileSync(settingsFile, 'utf8'))
+    e.returnValue = o && typeof o === 'object' && !Array.isArray(o) ? o : {}
+  } catch {
+    e.returnValue = {}
+  }
+})
+const writeSettings = (data: unknown) => {
+  if (!settingsFile) return
+  try {
+    writeFileSync(settingsFile, JSON.stringify(data, null, 2))
+  } catch {
+    // read-only folder: the settings just aren't kept
+  }
+}
+ipcMain.on('settings:save', (_e, data: unknown) => writeSettings(data))
+// when the window closes: write before it goes
+ipcMain.on('settings:saveSync', (e, data: unknown) => {
+  writeSettings(data)
+  e.returnValue = true
+})
+
+const assetsDir = () => (app.isPackaged ? join(process.resourcesPath, 'assets') : join(app.getAppPath(), 'assets'))
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -13,6 +50,9 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#14151a',
     title: 'DualSense Haptic Designer',
+    // the title bar and taskbar icon (the exe's own icon comes from the build). The .ico holds
+    // every size, so Windows doesn't have to shrink a big image down to 16 px itself
+    icon: join(assetsDir(), 'icon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -73,7 +113,7 @@ app.whenReady().then(() => {
       return null
     }
   })
-  ipcMain.handle('app:assetsDir', () => (app.isPackaged ? join(process.resourcesPath, 'assets') : join(app.getAppPath(), 'assets')))
+  ipcMain.handle('app:assetsDir', () => assetsDir())
 
   createWindow()
   app.on('activate', () => {

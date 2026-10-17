@@ -53,6 +53,7 @@
     ],
     "electronDist": "node_modules/electron/dist",
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "portable"
       ],

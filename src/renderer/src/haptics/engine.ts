@@ -29,6 +29,7 @@ export class HapticEngine {
   private splitter: ChannelSplitterNode | null = null
   private merger: ChannelMergerNode | null = null
   master: GainNode | null = null
+  private analysers: AnalyserNode[] = []
   sinkId = ''
   routing: RoutingMode = 'monitor'
   channelCount = 2
@@ -129,12 +130,24 @@ export class HapticEngine {
       const master = ctx.createGain()
       node.connect(splitter)
       merger.connect(master).connect(ctx.destination)
+      // taps on the two motor signals, for the live graphs (their own splitter: applyRouting
+      // disconnects everything on the routing one)
+      const tap = ctx.createChannelSplitter(2)
+      node.connect(tap)
+      const analysers = [0, 1].map((ch) => {
+        const an = ctx.createAnalyser()
+        an.fftSize = 4096
+        an.smoothingTimeConstant = 0.75
+        tap.connect(an, ch)
+        return an
+      })
 
       this.ctx = ctx
       this.node = node
       this.splitter = splitter
       this.merger = merger
       this.master = master
+      this.analysers = analysers
       this.sinkId = sinkId
       this.channelCount = channels
       this.applyRouting(channels >= 4 ? 'dualsense' : 'monitor')
@@ -190,6 +203,15 @@ export class HapticEngine {
   connectToChannel(node: AudioNode, ch: number) {
     if (!this.merger) return
     node.connect(this.merger, 0, this.channelCount >= 4 ? ch : ch % 2)
+  }
+
+  /**
+   * The synth's live signal for motor `ch` (0 = left, 1 = right): scenes and clip playback.
+   * `gain` is the master gain applied after it, so together they're what the motor gets.
+   */
+  motorAnalyser(ch: number): { node: AnalyserNode; gain: number } | null {
+    const node = this.analysers[ch]
+    return node && this.ctx ? { node, gain: this.master?.gain.value ?? 1 } : null
   }
 
   setMasterGain(v: number) {

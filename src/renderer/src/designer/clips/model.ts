@@ -13,7 +13,6 @@ import {
   type Grain,
   type Material,
 } from '../../haptics/dsp'
-import type { TriggerEffect } from '../../device/triggerEffects'
 
 export type ClipSource =
   /** Continuous oscillator with optional glide and pulse/AM */
@@ -58,14 +57,6 @@ export interface Clip {
   color?: string
 }
 
-export interface TriggerKey {
-  id: string
-  time: number
-  side: 'L' | 'R'
-  effect: TriggerEffect
-  presetName?: string
-}
-
 export interface HapticProject {
   version: 1
   name: string
@@ -74,19 +65,17 @@ export interface HapticProject {
   normalize?: boolean
   tracks: { name: string; mute: boolean; solo: boolean }[]
   clips: Clip[]
-  triggerKeys: TriggerKey[]
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10)
 
-/** Shortest a project gets (empty = 0 s). It grows to fit its clips and trigger keys and shrinks back when they move or go. */
+/** Shortest a project gets (empty = 0 s). It grows to fit its clips and shrinks back when they move or go. */
 export const MIN_DURATION = 0
 
-/** Project length: up to the end of the last clip or trigger key. What you see on the timeline is what plays. */
-export function fitDuration(p: Pick<HapticProject, 'clips' | 'triggerKeys'>): number {
+/** Project length: up to the end of the last clip. What you see on the timeline is what plays. */
+export function fitDuration(p: Pick<HapticProject, 'clips'>): number {
   let end = MIN_DURATION
   for (const c of p.clips) end = Math.max(end, c.start + c.duration)
-  for (const k of p.triggerKeys) end = Math.max(end, k.time + 0.05)
   return Math.round(end * 1000) / 1000
 }
 
@@ -101,7 +90,6 @@ export function newProject(): HapticProject {
       { name: 'Track 3', mute: false, solo: false },
     ],
     clips: [],
-    triggerKeys: [],
   }
 }
 

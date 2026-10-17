@@ -5,3 +5,6 @@ dist/
 
 # previous controller model (no longer used or credited)
 /ps5_controller.glb
+
+# icon source art (only the finished assets/icon.ico is kept in the repo)
+/icon/

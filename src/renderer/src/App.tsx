@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { dualSense } from './device/hid'
 import { hapticEngine, HapticEngine, type OutputDevice } from './haptics/engine'
 import { btHaptics } from './haptics/btHaptics'
-import { lightbar, loadLocal, saveLocal, tracker, useConnection, useTicker } from './store'
+import { lightbar, loadLocal, recenter, saveLocal, useConnection, useTicker } from './store'
+import { ButtonHint } from './ui/ButtonHint'
 import { ControllerView, loadModelFromBytes, placeholderModel, type LoadedModel } from './viewer/ControllerView'
 import { autoMap, defaultRig, knownRigFor, migrateRig, rigFitsModel, type RigMap } from './viewer/rig'
 import { ControllerPanel } from './designer/ControllerPanel'
@@ -190,7 +191,8 @@ export function App() {
             }}
             title="Drag to resize the 3D view · double-click to reset"
           />
-          {tab === 'workbench' && <MiniGraphs />}
+          {(tab === 'workbench' || tab === 'experiments') && <MiniGraphs key={tab} mode={tab} />}
+          <ButtonHint />
           <ControllerView model={model} rig={rig} />
           <SideInfo />
         </div>
@@ -213,7 +215,7 @@ function SideInfo() {
   return (
     <div className="side-info">
       <div className="row">
-        <button onClick={() => tracker.recenter()} disabled={!info} title="Hold the controller pointing at the screen, then click (or press Options, Create, L3 or R3 on the controller)">
+        <button onClick={() => recenter('Recenter')} disabled={!info} title="Hold the controller pointing at the screen, then click (or press Options, Create, L3 or R3 on the controller)">
           Recenter
         </button>
         <span className="muted small">

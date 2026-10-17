@@ -1,17 +1,15 @@
-// Haptic clip timeline: compose L/R actuator waveforms from primitives, imported WAVs,
-// and trigger-effect keyframes. Export as WAV (+ trigger JSON timeline).
+// Haptic clip timeline: compose L/R actuator waveforms from primitives and imported
+// sounds. Export as a stereo haptics WAV.
 
 import { platform } from '../../platform'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { hapticEngine } from '../../haptics/engine'
 import { SAMPLE_RATE, type Material } from '../../haptics/dsp'
 import { decodeWav, encodeWav, hapticChannels, resample } from '../../export/wav'
-import { encodeTrigger, EFFECT_LABELS } from '../../device/triggerEffects'
-import { loadLocal, PressTracker, saveLocal, useConnection } from '../../store'
+import { loadLocal, PressTracker, saveLocal } from '../../store'
 import { dualSense } from '../../device/hid'
 import { Card, downloadName, Param, Select } from '../../ui/controls'
-import { applyTrigger, releaseTriggers, triggerState } from '../triggers/TriggerPanel'
-import { CLIP_PRESETS, fitDuration, newProject, renderProject, uid, type Clip, type ClipSource, type HapticProject, type TriggerKey } from './model'
+import { CLIP_PRESETS, fitDuration, newProject, renderProject, uid, type Clip, type ClipSource, type HapticProject } from './model'
 
 const PX_PER_SEC_DEFAULT = 160
 const PLAY_ID = 'timeline'
@@ -25,15 +23,12 @@ export function ClipsPanel() {
     return { ...p, duration: fitDuration(p) }
   })
   const [sel, setSel] = useState<string | null>(null)
-  const [selKey, setSelKey] = useState<string | null>(null)
   const [pps, setPps] = useState(PX_PER_SEC_DEFAULT)
   const [playing, setPlaying] = useState(false)
   const [loop, setLoop] = useState(false)
   const [playhead, setPlayhead] = useState(0)
   const [msg, setMsg] = useState<string | null>(null)
-  const info = useConnection()
   const playStart = useRef<{ ctxTime: number; from: number } | null>(null)
-  const firedKeys = useRef(new Set<string>())
 
   // the length always follows the content: never set it by hand
   const setProject = (p: HapticProject) => {
@@ -47,23 +42,16 @@ export function ClipsPanel() {
 
   const rendered = useMemo(() => renderProject(project), [project])
   const selected = project.clips.find((c) => c.id === sel) ?? null
-  const selectedKey = project.triggerKeys.find((k) => k.id === selKey) ?? null
 
   // Playback ------------------------------------------------------------------
   const play = (from = playhead) => {
     // an empty project is 0 s long: nothing to play
-    if (!project.clips.length && !project.triggerKeys.length) return
+    if (!project.clips.length) return
     // the project may have shrunk out from under the playhead
     from = Math.min(from, project.duration)
     const off = Math.round(from * SAMPLE_RATE)
     hapticEngine.play(PLAY_ID, rendered.L, rendered.R, off, loop)
     playStart.current = { ctxTime: hapticEngine.ctx?.currentTime ?? 0, from }
-    firedKeys.current = new Set(project.triggerKeys.filter((k) => k.time < from).map((k) => k.id))
-    // apply the trigger state in effect at `from`
-    for (const side of ['L', 'R'] as const) {
-      const prior = project.triggerKeys.filter((k) => k.side === side && k.time <= from).sort((a, b) => b.time - a.time)[0]
-      if (prior) void applyTrigger(side === 'L' ? 'L2' : 'R2', prior.effect)
-    }
     setPlaying(true)
   }
   const stop = () => {
@@ -74,14 +62,8 @@ export function ClipsPanel() {
 
   useEffect(() => hapticEngine.onEnded((id) => id === PLAY_ID && (setPlaying(false), (playStart.current = null))) as unknown as () => void, [])
 
-  // Leaving the composer stops the clip and releases any trigger keyframe effects
-  useEffect(
-    () => () => {
-      hapticEngine.stopPlayback(PLAY_ID)
-      void releaseTriggers()
-    },
-    [],
-  )
+  // Leaving the composer stops the clip
+  useEffect(() => () => hapticEngine.stopPlayback(PLAY_ID), [])
 
   // Any face button plays the clip from the start (the composer has only a vibration track)
   const playRef = useRef(play)
@@ -115,18 +97,10 @@ export function ClipsPanel() {
       if (pos === undefined) return
       const t = pos / SAMPLE_RATE
       setPlayhead(t)
-      // trigger keyframes
-      for (const k of project.triggerKeys) {
-        if (k.time <= t && !firedKeys.current.has(k.id)) {
-          firedKeys.current.add(k.id)
-          void applyTrigger(k.side === 'L' ? 'L2' : 'R2', k.effect)
-        }
-      }
-      if (loop && t < 0.05) firedKeys.current.clear()
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [playing, project.triggerKeys, loop])
+  }, [playing])
 
   // Space = play/stop
   useEffect(() => {
@@ -139,9 +113,6 @@ export function ClipsPanel() {
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         setProject({ ...project, clips: project.clips.filter((c) => c.id !== sel) })
         setSel(null)
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selKey) {
-        setProject({ ...project, triggerKeys: project.triggerKeys.filter((k) => k.id !== selKey) })
-        setSelKey(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -203,22 +174,7 @@ export function ClipsPanel() {
   const exportWav = async () => {
     const bytes = encodeWav(rendered.L, rendered.R, SAMPLE_RATE, 'stereo')
     const path = await platform.saveFile(downloadName(project.name, 'wav'), [{ name: 'WAV', extensions: ['wav'] }], bytes)
-    if (!path) return
-    let extra = ''
-    if (project.triggerKeys.length) {
-      const timeline = {
-        format: 'dualsense-trigger-timeline',
-        version: 1,
-        wav: path.split(/[\\/]/).pop(),
-        keys: [...project.triggerKeys]
-          .sort((a, b) => a.time - b.time)
-          .map((k) => ({ time: Math.round(k.time * 1000) / 1000, trigger: k.side === 'L' ? 'L2' : 'R2', effect: k.effect, raw: encodeTrigger(k.effect) })),
-      }
-      const tpath = path.replace(/\.wav$/i, '') + '.triggers.json'
-      const saved = await platform.saveFile(tpath.split(/[\\/]/).pop()!, [{ name: 'JSON', extensions: ['json'] }], JSON.stringify(timeline, null, 2))
-      if (saved) extra = ` + ${saved}`
-    }
-    setMsg(`Exported ${path}${extra}`)
+    if (path) setMsg(`Exported ${path}`)
   }
 
   const saveProject = async () => {
@@ -239,14 +195,6 @@ export function ClipsPanel() {
     }
   }
 
-  const addTriggerKey = (side: 'L' | 'R') => {
-    const effect = triggerState[side === 'L' ? 'L2' : 'R2']
-    const k: TriggerKey = { id: uid(), time: Math.round(playhead * 100) / 100, side, effect }
-    setProject({ ...project, triggerKeys: [...project.triggerKeys, k] })
-    setSelKey(k.id)
-    setSel(null)
-  }
-
   return (
     <>
       <div className="row" style={{ marginBottom: 10 }}>
@@ -260,7 +208,7 @@ export function ClipsPanel() {
         <span className="mono">{playhead.toFixed(2)}s</span>
         <input type="text" value={project.name} onChange={(e) => setProject({ ...project, name: e.target.value })} style={{ width: 180 }} />
         <span className="muted">Length</span>
-        <span className="mono" title="Fits the clips and trigger keys">{project.duration.toFixed(2)}s</span>
+        <span className="mono" title="Fits the clips">{project.duration.toFixed(2)}s</span>
         <label className="row" title="Scale the whole mix so its loudest point is full strength (playback and export)">
           <input type="checkbox" checked={project.normalize !== false} onChange={(e) => setProject({ ...project, normalize: e.target.checked })} /> Normalize
         </label>
@@ -280,9 +228,6 @@ export function ClipsPanel() {
           </button>
         ))}
         <button onClick={() => void importWav()} title="Import a sound file as a clip (or drop a file onto a track)">Sound…</button>
-        <span className="muted" style={{ marginLeft: 8 }}>Trigger key at playhead:</span>
-        <button onClick={() => addTriggerKey('L')} title="Uses the current L2 effect from Haptics & Triggers">+L2</button>
-        <button onClick={() => addTriggerKey('R')} title="Uses the current R2 effect from Haptics & Triggers">+R2</button>
       </div>
 
       <Timeline
@@ -290,17 +235,14 @@ export function ClipsPanel() {
         pps={pps}
         playhead={playhead}
         sel={sel}
-        selKey={selKey}
         onSeek={(t) => {
           setPlayhead(t)
           if (playing) play(t)
         }}
-        onSelect={(id) => { setSel(id); setSelKey(null) }}
-        onSelectKey={(id) => { setSelKey(id); setSel(null) }}
+        onSelect={setSel}
         onMove={(id, start, track) => updateClip(id, { start, track })}
         onDropFile={(file, track, time) => void file.arrayBuffer().then((b) => importSound(file.name, new Uint8Array(b), track, time))}
         onResize={(id, duration) => updateClip(id, { duration })}
-        onMoveKey={(id, time) => setProject({ ...project, triggerKeys: project.triggerKeys.map((k) => (k.id === id ? { ...k, time } : k)) })}
         onTrack={(i, patch) => setProject({ ...project, tracks: project.tracks.map((t, j) => (j === i ? { ...t, ...patch } : t)) })}
         onAddTrack={() => setProject({ ...project, tracks: [...project.tracks, { name: `Track ${project.tracks.length + 1}`, mute: false, solo: false }] })}
       />
@@ -315,20 +257,7 @@ export function ClipsPanel() {
       </div>
 
       {selected && <ClipInspector clip={selected} onChange={(p) => updateClip(selected.id, p)} onSource={(p) => updateSource(selected.id, p)} onDelete={() => { setProject({ ...project, clips: project.clips.filter((c) => c.id !== selected.id) }); setSel(null) }} onDuplicate={() => { const c = { ...structuredClone(selected), id: uid(), start: selected.start + selected.duration }; setProject({ ...project, clips: [...project.clips, c] }); setSel(c.id) }} />}
-      {selectedKey && (
-        <Card title={`Trigger key · ${selectedKey.side}2`} right={<button className="danger" onClick={() => { setProject({ ...project, triggerKeys: project.triggerKeys.filter((k) => k.id !== selectedKey.id) }); setSelKey(null) }}>Delete</button>}>
-          <div className="row">
-            <span className="muted">Time</span>
-            <input type="number" step={0.01} value={selectedKey.time} onChange={(e) => setProject({ ...project, triggerKeys: project.triggerKeys.map((k) => (k.id === selectedKey.id ? { ...k, time: Math.max(0, Number(e.target.value)) } : k)) })} />
-            <span>{EFFECT_LABELS[selectedKey.effect.type]}</span>
-            <button onClick={() => setProject({ ...project, triggerKeys: project.triggerKeys.map((k) => (k.id === selectedKey.id ? { ...k, effect: triggerState[k.side === 'L' ? 'L2' : 'R2'] } : k)) })}>
-              Replace with current {selectedKey.side}2 effect
-            </button>
-            {!info && <span className="muted small">(connect a controller to feel trigger keys during playback)</span>}
-          </div>
-        </Card>
-      )}
-      {!selected && !selectedKey && (
+      {!selected && (
         <p className="muted small">
           Click a clip to edit it. Drag clips to move (across tracks too), drag the right edge to resize, drop a sound file onto a track to add it there. <kbd>Space</kbd> plays/stops, any face button on the controller plays from the start, <kbd>Del</kbd> deletes. Pan −1 = left
           grip, +1 = right grip — sweeping pan across a clip makes the sensation travel through the controller.
@@ -343,15 +272,12 @@ function Timeline(props: {
   pps: number
   playhead: number
   sel: string | null
-  selKey: string | null
   onSeek: (t: number) => void
   onSelect: (id: string) => void
-  onSelectKey: (id: string) => void
   onMove: (id: string, start: number, track: number) => void
   /** a sound file dropped onto track `track` at `time` s */
   onDropFile: (file: File, track: number, time: number) => void
   onResize: (id: string, duration: number) => void
-  onMoveKey: (id: string, time: number) => void
   onTrack: (i: number, patch: Partial<HapticProject['tracks'][number]>) => void
   onAddTrack: () => void
 }) {
@@ -413,20 +339,6 @@ function Timeline(props: {
     },
   })
 
-  const dragKey = (e: React.PointerEvent, k: TriggerKey) => {
-    e.stopPropagation()
-    props.onSelectKey(k.id)
-    const x0 = e.clientX
-    const t0 = k.time
-    const move = (ev: PointerEvent) => props.onMoveKey(k.id, Math.max(0, Math.round((t0 + (ev.clientX - x0) / pps) * 100) / 100))
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
   const seekFrom = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
     props.onSeek(Math.max(0, Math.min(project.duration, (e.clientX - r.left) / pps)))
@@ -476,21 +388,6 @@ function Timeline(props: {
               </div>
             </div>
           ))}
-          <div className="tl-track" style={{ height: 26 }}>
-            <div className="tl-head small muted">Triggers</div>
-            <div className="tl-lane" style={{ width: viewW, backgroundImage: pastEnd }} onMouseDown={seekFrom}>
-              {project.triggerKeys.map((k) => (
-                <div
-                  key={k.id}
-                  className={`tl-key ${props.selKey === k.id ? 'sel' : ''}`}
-                  style={{ left: k.time * pps, background: k.side === 'L' ? 'var(--left)' : 'var(--right)' }}
-                  title={`${k.side}2 → ${EFFECT_LABELS[k.effect.type]} @ ${k.time}s`}
-                  onPointerDown={(e) => dragKey(e, k)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                />
-              ))}
-            </div>
-          </div>
         </div>
         <div className="tl-playhead" style={{ left: 120 + props.playhead * pps }} />
       </div>

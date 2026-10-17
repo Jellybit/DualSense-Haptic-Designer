@@ -57,6 +57,11 @@ to make one.
   protected your PC"*. Click **More info → Run anyway**.
 - The single-file exe unpacks itself to a temporary folder on each launch, so it takes a few
   seconds to start. The folder build (below) starts instantly.
+- It's portable: your settings (EQs, trigger effects, scenes, the composer project, the last
+  sound's location…) are saved in **`DualSense Haptic Designer.settings.json`** next to the exe.
+  Only a throwaway browser-engine cache goes to Windows' Temp folder. Move both files together
+  to take your setup along; delete the settings file to start fresh. The folder build and the desktop app from source keep their
+  settings in AppData as usual.
 
 ### Desktop app from source
 
@@ -119,8 +124,11 @@ npm run dist:dir    # → dist/win-unpacked/DualSense Haptic Designer.exe   (fol
 - The first build downloads electron-builder's packaging tools; later builds reuse them.
 - Packaging settings live in the `build` section of `package.json`. Code signing and editing
   the exe's resources are turned off (`signAndEditExecutable: false`). That avoids needing a
-  certificate, and avoids a Windows permissions error while unpacking the signing tools. As a
-  result the exe uses Electron's default icon.
+  certificate, and avoids a Windows permissions error while unpacking the signing tools.
+- **Icon:** `assets/icon.ico` (16 to 256 px) is the app icon: the portable exe gets it from
+  `win.icon` in `package.json`, and it's also the window and taskbar icon and the web version's
+  favicon. Because the exe's resources aren't edited, the folder build's
+  `DualSense Haptic Designer.exe` still shows Electron's icon in Explorer.
 
 ---
 
@@ -166,7 +174,9 @@ The coloured dot next to the audio menu is **green** when vibration goes to the 
    | △ | PC audio only |
    | □ | PC audio + vibration |
 
-   The speaker and PC always play the **original, unedited** sound; only the motors get the EQs.
+   Pressing one also shows what it does (e.g. "✕ - Vibration Only") over the 3D view for a
+   moment. The speaker and PC always play the **original, unedited** sound; only the motors get
+   the EQs.
    *Play From Start / Play When Held* applies to the buttons and face buttons. **PC sound**
    picks the output for "PC audio".
 4. **Vibration Power** scales the motors (and the exports). **Normalize Vibration** instead
@@ -189,8 +199,10 @@ Each trigger has two dropdowns:
 In **Custom**, click the graph to add a point, drag to move it (points can't pass their
 neighbours), and select a point then press **Delete** to remove it. The blue blocks (force) or
 the jagged yellow line (vibration) show exactly what each of the 10 zones receives. The green
-line is your trigger's live position. **Export trigger JSON** saves both triggers for your
-game.
+line is your trigger's live position. **Export JSON** saves both triggers for your game, using
+the **Name** at the start of that row (`default` until you change it): the file is
+`<name>.triggers.json` and the presets inside are "<name> L2" and "<name> R2". **Import JSON**
+loads a file back and takes its name.
 
 Effects only apply while this tab is open; switching tabs releases the triggers.
 
@@ -213,9 +225,21 @@ Toys that aren't part of the export workflow but show what the haptics can do:
   things are. Critters wander, stop, investigate, greet each other and dodge marbles. A quick
   lift of the controller tosses everything into the air.
 - **Haptic clip composer:** a multi-track timeline of synthesized haptic clips (heartbeat,
-  footsteps, explosion…) and imported sounds (drop a file onto a track), with trigger
-  keyframes. The length follows the clips, **Normalize** brings the mix's loudest point to full
-  strength, and any face button plays it.
+  footsteps, explosion…) and imported sounds (drop a file onto a track). The length follows
+  the clips, **Normalize** brings the mix's loudest point to full strength, and any face
+  button plays it.
+
+### The 3D view
+
+The controller model on the right follows the real controller's motion. Drag its left edge to
+make it wider or narrower (double-click the edge to reset).
+
+- On **Haptics & Triggers**, small live copies of both motor graphs and both trigger graphs sit
+  above it, so you can watch them while you scroll through the EQs.
+- On **Experiments**, the two motor graphs show what the scenes or the composer are sending to
+  each grip, with clipping in red.
+- When a controller button does something (plays a sound, resets the view), its name and action
+  appear briefly under the graphs.
 
 ### Controller & Model
 
@@ -283,7 +307,6 @@ you see and try all of this directly.
 | **Haptics-only WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 1 = left motor, ch 2 = right motor. A **haptic** signal, not sound: it's meant to be felt through the grip motors, not heard. | For engines/middleware that route haptics to the motors themselves (e.g. as a haptics asset). Route it to the motors, not to an audio output. |
 | **Clip composer WAV** (stereo) | the timeline's left/right actuators. Also a **haptic** signal, not sound. | Same as the haptics-only WAV. |
 | **Trigger JSON** (`*.triggers.json`) | `{ format: "dualsense-trigger-presets", presets: [{ name, trigger, effect, raw }] }` | `raw` is the 11 bytes to copy into the trigger block of the output report. USB report `0x02`, counting the report ID: bytes 11–21 = R2, 22–32 = L2. `effect` lets the app reopen it for editing. |
-| **Trigger timeline** (next to a clip WAV) | `{ keys: [{ time, trigger, effect, raw }] }` | Send each `raw` at its `time`. |
 | **Scenes / clip projects** | `*.scene.json`, `*.dshd.json` | Reopen in the app. |
 
 **Vibration curves with per-point frequency** also carry `zoneFrequencies` (10 values, Hz).
