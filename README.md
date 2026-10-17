@@ -327,7 +327,6 @@ app does exactly this live.
   audio is silent at first, click anywhere once.
 - Saving uses a save dialog where supported, otherwise a normal download.
 - A 3D model you load yourself isn't remembered between visits (the bundled one always loads).
-- Bluetooth haptics streaming is untested in the browser.
 
 ---
 
