@@ -151,6 +151,10 @@ The coloured dot next to the audio menu is **green** when vibration goes to the 
    a live spectrum. By default the left motor takes the file's left channel and the right motor
    its right channel. A mono file feeds both, and the two EQs can split it (the low boom on one
    motor, the crackle on the other). A 4-channel file starts from its own channels 3/4.
+   **Audio Play** on a motor card plays just that motor's signal (its channel and EQ) on the PC
+   output, so you can hear what it gets. If a motor's signal goes past the top of the range, a red
+   **Clips** warning appears next to its Gain, and its graph marks the frequencies doing it in red
+   while it plays. Clipping is safe for the controller, but it flattens the strongest moments.
 3. **Play it.** The **▶ Play** button plays whatever the menu next to it says: *PC Audio Only*,
    *Vibration Only*, *Vibration + PC Audio*, *Vibration + Controller Audio* or *Controller Audio
    Only*. Or use the controller's face buttons:
@@ -204,9 +208,13 @@ Toys that aren't part of the export workflow but show what the haptics can do:
 
 - **Interactive scenes:** marbles, critters and a particle liquid "inside" the controller.
   Tilt moves them; collisions, rolling and footsteps become vibration, panned left/right by
-  position.
-- **Haptic clip composer:** a multi-track timeline of synthesized haptic clips and imported
-  sounds (drop a file onto a track), with trigger keyframes. Any face button plays it.
+  position and louder toward the bottom wall (softer toward the top), so you can feel where
+  things are. Critters wander, stop, investigate, greet each other and dodge marbles. A quick
+  lift of the controller tosses everything into the air.
+- **Haptic clip composer:** a multi-track timeline of synthesized haptic clips (heartbeat,
+  footsteps, explosion…) and imported sounds (drop a file onto a track), with trigger
+  keyframes. The length follows the clips, **Normalize** brings the mix's loudest point to full
+  strength, and any face button plays it.
 
 ### Controller & Model
 
@@ -272,7 +280,7 @@ you see and try all of this directly.
 |---|---|---|
 | **DualSense 4-ch WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 3/4 = left/right grip motors, ch 1/2 silent | Plays as-is on the controller's USB audio device. Play it on that device and it vibrates. |
 | **Haptics-only WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 1 = left motor, ch 2 = right motor | For engines/middleware that route haptics to the motors themselves (e.g. as a haptics asset). |
-| **Clip composer WAV** (stereo or 4-ch) | the timeline's left/right actuators | Same as the two above. |
+| **Clip composer WAV** (stereo) | the timeline's left/right actuators | Same as the haptics-only WAV. |
 | **Trigger JSON** (`*.triggers.json`) | `{ format: "dualsense-trigger-presets", presets: [{ name, trigger, effect, raw }] }` | `raw` is the 11 bytes to copy into the trigger block of the output report. USB report `0x02`, counting the report ID: bytes 11–21 = R2, 22–32 = L2. `effect` lets the app reopen it for editing. |
 | **Trigger timeline** (next to a clip WAV) | `{ keys: [{ time, trigger, effect, raw }] }` | Send each `raw` at its `time`. |
 | **Scenes / clip projects** | `*.scene.json`, `*.dshd.json` | Reopen in the app. |
