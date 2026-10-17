@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { crc32, crc32Seeded } from '../src/renderer/src/device/crc32'
+import { crc32, crc32Seeded, crc32Update } from '../src/renderer/src/device/crc32'
 import { decodeTrigger, effectProfile, encodeTrigger, slopeStrengths } from '../src/renderer/src/device/triggerEffects'
 import { buildBtHaptics, buildBtOutput, buildCommon, buildUsbOutput } from '../src/renderer/src/device/outputReport'
 import { emptyInputState, parseCalibration, parseInputReport } from '../src/renderer/src/device/inputReport'
@@ -112,12 +112,15 @@ describe('output reports', () => {
     const samples = new Uint8Array(64).map((_, i) => i)
     const d = buildBtHaptics(samples, 9)
     const full = [0x32, ...d]
-    expect(full.length).toBe(141)
-    expect(full.slice(1, 13)).toEqual([0x00, 0x91, 7, 0xfe, 0, 0, 0, 0, 0xff, 9, 0x92, 64])
+    // SAxense: a packed struct of report id + 141 bytes, CRC over bytes 0-137 stored at 138-141
+    expect(full.length).toBe(142)
+    // byte 1: sequence counter in the high nibble (9 → 0x90)
+    expect(full.slice(1, 13)).toEqual([0x90, 0x91, 7, 0xfe, 0, 0, 0, 0, 0xff, 9, 0x92, 64])
     expect(full[13]).toBe(0)
     expect(full[76]).toBe(63)
-    const crc = crc32Seeded(0xa2, full, 0, 137)
-    expect((full[137] | (full[138] << 8) | (full[139] << 16) | (full[140] << 24)) >>> 0).toBe(crc)
+    // computed the SAxense way: CRC state starts at ~0xEADA2D49 (= after feeding 0xA2), result inverted
+    const crc = (crc32Update(~0xeada2d49 >>> 0, full, 0, 138) ^ 0xffffffff) >>> 0
+    expect((full[138] | (full[139] << 8) | (full[140] << 16) | (full[141] << 24)) >>> 0).toBe(crc)
   })
 })
 

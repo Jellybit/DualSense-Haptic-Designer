@@ -131,26 +131,28 @@ export function buildBtOutput(state: OutputState, seq: number): Uint8Array<Array
 }
 
 // ---------------------------------------------------------------------------
-// Bluetooth haptics (experimental). Layout from SAxense (github.com/egormanga/SAxense):
-//   report 0x32, 141 bytes incl. ID:
+// Bluetooth haptics (experimental). Layout from SAxense (github.com/egormanga/SAxense),
+// sample format and sequence counter as in DS5Dongle (github.com/awalol/DS5Dongle):
+//   report 0x32, 142 bytes incl. ID (141 after it):
 //   [0]   0x32
-//   [1]   tag/seq (0)
+//   [1]   sequence counter (0-15) in the high nibble
 //   [2]   packet 0x11 header: pid 0x11 | sized(0x80) = 0x91, [3] length 7
 //   [4..10]  0xFE,0,0,0,0,0xFF,counter
 //   [11]  packet 0x12 header: 0x92, [12] length 64
-//   [13..76] 64 bytes of interleaved unsigned 8-bit stereo PCM @ 3000 Hz (32 frames)
-//   [137..140] CRC-32 (seed 0xA2) over bytes [0..136]
+//   [13..76] 64 bytes of interleaved signed 8-bit stereo PCM @ 3000 Hz (32 frames)
+//   [77..137] zero
+//   [138..141] CRC-32 (seed 0xA2) over bytes [0..137], little-endian
 // ---------------------------------------------------------------------------
 export const BT_HAPTICS_REPORT_ID = 0x32
-export const BT_HAPTICS_SIZE = 141
+export const BT_HAPTICS_SIZE = 142
 export const BT_HAPTICS_RATE = 3000
 export const BT_HAPTICS_FRAMES = 32
 
-/** Build a report 0x32 payload (without report ID, 140 bytes). `samples` = 64 interleaved u8. */
+/** Build a report 0x32 payload (without report ID, 141 bytes). `samples` = 64 interleaved signed 8-bit (two's complement bytes). */
 export function buildBtHaptics(samples: Uint8Array, counter: number): Uint8Array<ArrayBuffer> {
   const r = new Uint8Array(BT_HAPTICS_SIZE)
   r[0] = BT_HAPTICS_REPORT_ID
-  r[1] = 0
+  r[1] = (counter & 0x0f) << 4
   r[2] = 0x91
   r[3] = 7
   r.set([0xfe, 0, 0, 0, 0, 0xff, counter & 0xff], 4)
@@ -158,9 +160,9 @@ export function buildBtHaptics(samples: Uint8Array, counter: number): Uint8Array
   r[12] = 64
   r.set(samples.subarray(0, 64), 13)
   const crc = crc32Seeded(0xa2, r, 0, BT_HAPTICS_SIZE - 4)
-  r[137] = crc & 0xff
-  r[138] = (crc >>> 8) & 0xff
-  r[139] = (crc >>> 16) & 0xff
-  r[140] = (crc >>> 24) & 0xff
+  r[138] = crc & 0xff
+  r[139] = (crc >>> 8) & 0xff
+  r[140] = (crc >>> 16) & 0xff
+  r[141] = (crc >>> 24) & 0xff
   return r.subarray(1)
 }

@@ -136,7 +136,7 @@ to make one.
 | Connection | What works |
 |---|---|
 | **USB** (recommended) | Everything: buttons, sticks, motion, touchpad, lightbar, **adaptive triggers**, and **audio haptics** through the controller's 4-channel USB audio device. |
-| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. |
+| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. It uses the 8-bit, 3 kHz format worked out by community projects (Sony's own isn't public), so it can feel rougher and lag behind USB, and it only carries the Experiments tab's vibration. |
 
 On the desktop app the controller's audio device is selected automatically. In a browser,
 click **Connect to Controller Vibration** (in Sound → Grip motors) once and allow the prompt.
@@ -380,3 +380,4 @@ Electron + TypeScript + React + three.js, built with electron-vite (desktop) and
   report layouts, IMU calibration, speaker/headphone routing
 - Nielk1's DualSense trigger effect generator: trigger mode encodings
 - [SAxense](https://github.com/egormanga/SAxense): Bluetooth haptics report `0x32`
+- [DS5Dongle](https://github.com/awalol/DS5Dongle): Bluetooth haptics sample format (signed 8-bit) and sequence counter

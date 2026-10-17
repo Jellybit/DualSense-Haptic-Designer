@@ -208,6 +208,28 @@ function clampSide(w: number) {
   return Math.round(Math.max(260, Math.min(w, window.innerWidth - 480)))
 }
 
+const BT_HAPTICS_WARNING = `Bluetooth vibration is experimental, and it can feel drastically worse than over USB.
+
+It uses a format worked out by community projects (8-bit at 3 kHz; USB is 16-bit at 48 kHz). Sony's own Bluetooth format isn't public. A weak or busy Bluetooth connection can also add delay and make it choppy. It only carries the Experiments tab's vibration, not the sound on Haptics & Triggers.
+
+For designing grip vibration, connect the controller by USB.
+
+Turn on Bluetooth vibration anyway?`
+
+/** Live numbers for the experimental Bluetooth haptics stream: is it keeping up? */
+function BtHapticsReadout() {
+  useTicker(4)
+  const s = btHaptics.stats
+  return (
+    <span
+      className="muted small mono"
+      title="Packets sent per second (should be ~94) · how long each send takes · gaps (the stream ran dry) · drops (Bluetooth fell behind)"
+    >
+      {s.sentPerSec}/s · {s.sendMs.toFixed(1)} ms · gaps {s.gaps} · drops {s.dropped}
+    </span>
+  )
+}
+
 function SideInfo() {
   useTicker(15)
   const s = dualSense.state
@@ -322,13 +344,14 @@ function AudioControls() {
           title="Experimental: stream haptics over Bluetooth (report 0x32)"
           onClick={() => {
             if (btHaptics.active) btHaptics.stop()
-            else btHaptics.start(hapticEngine, dualSense)
+            else if (window.confirm(BT_HAPTICS_WARNING)) btHaptics.start(hapticEngine, dualSense)
             force((x) => x + 1)
           }}
         >
           BT haptics {btHaptics.active ? 'on' : 'off'}
         </button>
       )}
+      {info?.transport === 'bt' && btHaptics.active && <BtHapticsReadout />}
     </span>
   )
 }
