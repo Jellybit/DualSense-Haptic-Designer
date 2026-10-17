@@ -2,8 +2,8 @@
 // The engine's 48 kHz output is low-passed (4th-order, 1.2 kHz) and decimated to 3 kHz,
 // dithered to signed 8-bit stereo and sent 32 frames at a time in report 0x32.
 //
-// Pacing: the engine hands over audio in ~21 ms blocks, which would make bursts of two
-// packets and then a gap. The controller wants one packet every 10.67 ms, so packets go
+// Pacing: the engine hands over audio in 5.3 ms blocks, which arrive unevenly (several at
+// once, then a pause). The controller wants one packet every 10.67 ms, so packets go
 // into a small queue and a steady clock sends them. If Bluetooth falls behind, the oldest
 // audio is dropped so the vibration doesn't lag further and further.
 

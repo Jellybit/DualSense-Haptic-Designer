@@ -3,7 +3,9 @@
 
 import { HapticMixer, type MixerMessage } from './mixer'
 
-const TAP_BLOCK = 1024
+// Output blocks handed to the page for Bluetooth haptics: 256 samples (5.3 ms) keeps the
+// added delay small; bigger blocks wait longer before anything can be sent
+const TAP_BLOCK = 256
 
 class HapticSynthProcessor extends AudioWorkletProcessor {
   private mixer = new HapticMixer(sampleRate)
