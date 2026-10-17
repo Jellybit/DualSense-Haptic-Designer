@@ -17,6 +17,9 @@ hands-on reference for the DualSense's haptics, triggers and inputs.
 It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a browser**
 (Chrome or Edge).
 
+AI assistance was used when developing this app. It still took several days and a ton of design 
+decisions for usability and usefulness, by a career game designer for almost 20 years.
+
 <img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/71124669-6528-4b27-b319-6c21e8fdd805" />
 
 ---
