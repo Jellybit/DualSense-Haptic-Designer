@@ -1,10 +1,10 @@
 # DualSense Haptic Designer
 
-A workbench for designing PlayStation 5 DualSense feedback, and for learning how the
+A workbench for designing PlayStation 5 DualSense feedback/haptics, and for learning how the
 controller actually works.
 
 It's made for **game developers** and for anyone **adding DualSense support to another
-project** (an engine, an emulator, a mod, a library). You can:
+project** (an engine, an emulator, a decomp, a mod, a library). You can:
 
 - turn any sound into grip-motor vibration and feel it immediately,
 - design adaptive-trigger resistance and vibration on a graph and feel it live,
