@@ -17,6 +17,8 @@ hands-on reference for the DualSense's haptics, triggers and inputs.
 It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a browser**
 (Chrome or Edge).
 
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/71124669-6528-4b27-b319-6c21e8fdd805" />
+
 ---
 
 ## Contents
@@ -40,6 +42,8 @@ It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a 
 ### Haptics & Triggers (the main workflow)
 
 **Sound → Grip motors**
+
+<img width="1685" height="1165" alt="image" src="https://github.com/user-attachments/assets/1474cc6e-139b-46cb-85d3-6aa15378580b" />
 
 1. **Load or drop a sound** (WAV, MP3, OGG, FLAC, M4A). The last sound you loaded comes back
    next time.
@@ -76,6 +80,8 @@ It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a 
 
 **Trigger force feedback**
 
+<img width="1690" height="655" alt="image" src="https://github.com/user-attachments/assets/7b01b1a7-a4e8-42e3-9000-879fec475ad5" />
+
 Each trigger has two dropdowns:
 
 - **Off**
@@ -104,6 +110,10 @@ zones to real travel, separately for L2 and R2. After that, every graph and labe
 effects are actually felt.
 
 ### Experiments
+
+
+<img width="1687" height="1112" alt="image" src="https://github.com/user-attachments/assets/755c1673-6b2a-4bf2-8562-f0f1cf394d7b" />
+
 
 Toys that aren't part of the export workflow but show what the haptics can do:
 
