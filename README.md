@@ -174,6 +174,7 @@ The coloured dot next to the audio menu is **green** when vibration goes to the 
    motors, so their balance is kept, and each motor's EQ gain applies after it. The waveform
    and spectra show what the motors really get, with clipping in red.
 5. **Export** a 4-channel WAV or a haptics-only (stereo) WAV (see [Export formats](#export-formats-and-using-them-in-a-game)).
+   Both hold vibration signals for the motors, not sound to listen to.
 
 **Trigger force feedback**
 
@@ -279,8 +280,8 @@ you see and try all of this directly.
 | Export | Contents | How to use it |
 |---|---|---|
 | **DualSense 4-ch WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 3/4 = left/right grip motors, ch 1/2 silent | Plays as-is on the controller's USB audio device. Play it on that device and it vibrates. |
-| **Haptics-only WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 1 = left motor, ch 2 = right motor | For engines/middleware that route haptics to the motors themselves (e.g. as a haptics asset). |
-| **Clip composer WAV** (stereo) | the timeline's left/right actuators | Same as the haptics-only WAV. |
+| **Haptics-only WAV** (Haptics & Triggers) | 48 kHz 16-bit; ch 1 = left motor, ch 2 = right motor. A **haptic** signal, not sound: it's meant to be felt through the grip motors, not heard. | For engines/middleware that route haptics to the motors themselves (e.g. as a haptics asset). Route it to the motors, not to an audio output. |
+| **Clip composer WAV** (stereo) | the timeline's left/right actuators. Also a **haptic** signal, not sound. | Same as the haptics-only WAV. |
 | **Trigger JSON** (`*.triggers.json`) | `{ format: "dualsense-trigger-presets", presets: [{ name, trigger, effect, raw }] }` | `raw` is the 11 bytes to copy into the trigger block of the output report. USB report `0x02`, counting the report ID: bytes 11–21 = R2, 22–32 = L2. `effect` lets the app reopen it for editing. |
 | **Trigger timeline** (next to a clip WAV) | `{ keys: [{ time, trigger, effect, raw }] }` | Send each `raw` at its `time`. |
 | **Scenes / clip projects** | `*.scene.json`, `*.dshd.json` | Reopen in the app. |
