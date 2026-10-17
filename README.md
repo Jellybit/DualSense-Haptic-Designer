@@ -21,128 +21,17 @@ It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a 
 
 ## Contents
 
-- [Quick start](#quick-start)
-- [Running it](#running-it): standalone exe, desktop app from source, web server
-- [Building the standalone exe](#building-the-standalone-exe)
-- [Connecting the controller](#connecting-the-controller)
 - [Tour of the app](#tour-of-the-app)
+- [Quick start](#quick-start)
+- [Connecting the controller](#connecting-the-controller)
 - [What you'll learn about the DualSense](#what-youll-learn-about-the-dualsense)
 - [Export formats and using them in a game](#export-formats-and-using-them-in-a-game)
 - [Running in a browser: limits](#running-in-a-browser-limits)
 - [3D model and credits](#3d-model-and-credits)
+- [Running it](#running-it): standalone exe, desktop app from source, web server
+- [Building the standalone exe](#building-the-standalone-exe)
 - [Development](#development)
 - [References](#references)
-
----
-
-## Quick start
-
-1. Plug the DualSense into the PC **with a USB cable** (full haptics need USB).
-2. Start the app (the standalone exe, or one of the batch files below).
-3. Click **Connect DualSense** (top right).
-4. On **Haptics & Triggers**, drop a sound file (WAV, MP3, OGG, FLAC) onto the page.
-5. Press **✕** on the controller to feel it in the grips.
-
----
-
-## Running it
-
-### Desktop app from source
-
-Needs [Node.js](https://nodejs.org) (LTS).
-
-**Easiest:** double-click **`Run DualSense Haptic Designer.bat`**. It installs dependencies
-the first time, builds, and starts the app. Closing its window closes the app.
-
-Or from a terminal:
-
-```
-npm install      # once
-npm start        # build and run the desktop app
-npm run dev      # development mode with hot reload
-```
-
-**`Run Trigger Calibration.bat`** opens the app straight into the trigger calibration wizard
-(see [Trigger calibration](#trigger-calibration)).
-
-### Web server (run it in a browser)
-
-Needs Node.js, plus **Chrome or Edge** to use it.
-
-**Easiest:** double-click **`Run DualSense Haptic Designer (browser).bat`**. It builds the
-web version, starts a local server at **http://localhost:5174** and opens it in Chrome (or
-Edge). If the server is already running, it just opens another tab. Closing its window stops
-the server.
-
-Or from a terminal:
-
-```
-npm install          # once
-npm run web:build    # build the web version into out/web/
-npm run web:preview  # serve out/web/ at http://localhost:5174
-npm run web          # or: development server with hot reload, same address
-```
-
-`out/web/` is a plain static site, so you can also host it yourself. It must be served from
-`localhost` or over **https**, because browsers only allow controller (WebHID) and
-audio-output access on secure pages. See [the browser's limits](#running-in-a-browser-limits).
-
----
-
-## Building the standalone exe
-
-The packaged app **doesn't need `node_modules`**. The interface (React, three.js and the
-app code) is compiled into a few bundled files, and the desktop shell only uses Electron and
-Node's built-ins. The exe contains just the Electron runtime, about 1.7 MB of app code and the
-3D model.
-
-You need Node.js and the project's dependencies **on the build machine only**:
-
-```
-npm install         # once
-npm run dist        # → dist/DualSense Haptic Designer 0.1.0.exe   (single portable file, ~78 MB)
-npm run dist:dir    # → dist/win-unpacked/DualSense Haptic Designer.exe   (folder, ~275 MB, starts instantly)
-```
-
-- Copy the single exe (or the whole `win-unpacked` folder) to any Windows PC and run it.
-- The first build downloads electron-builder's packaging tools; later builds reuse them.
-- Packaging settings live in the `build` section of `package.json`. Code signing and editing
-  the exe's resources are turned off (`signAndEditExecutable: false`). That avoids needing a
-  certificate, and avoids a Windows permissions error while unpacking the signing tools.
-- **Icon:** `assets/icon.ico` (16 to 256 px) is the app icon: the portable exe gets it from
-  `win.icon` in `package.json`, and it's also the window and taskbar icon and the web version's
-  favicon. Because the exe's resources aren't edited, the folder build's
-  `DualSense Haptic Designer.exe` still shows Electron's icon in Explorer.
-
-### Standalone exe (no install, no Node.js)
-
-Once you build the exe, you can run it portably without any subfolders or other files, or run it more quickly with the unpacked version. See [Building the standalone exe](#building-the-standalone-exe)
-to make one.
-
-- The exe isn't code-signed, so the first time Windows SmartScreen may say *"Windows
-  protected your PC"*. Click **More info → Run anyway**.
-- The single-file exe unpacks itself to a temporary folder on each launch, so it takes a few
-  seconds to start. The folder build (below) starts instantly.
-- It's portable: your settings (EQs, trigger effects, scenes, the composer project, the last
-  sound's location…) are saved in **`DualSense Haptic Designer.settings.json`** next to the exe.
-  Only a throwaway browser-engine cache goes to Windows' Temp folder. Move both files together
-  to take your setup along; delete the settings file to start fresh. The folder build and the desktop app from source keep their
-  settings in AppData as usual.
-
----
-
-## Connecting the controller
-
-| Connection | What works |
-|---|---|
-| **USB** (recommended) | Everything: buttons, sticks, motion, touchpad, lightbar, **adaptive triggers**, and **audio haptics** through the controller's 4-channel USB audio device. |
-| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. It uses the 8-bit, 3 kHz format worked out by community projects (Sony's own isn't public), so it can feel rougher and lag behind USB, and it only carries the Experiments tab's vibration. |
-
-On the desktop app the controller's audio device is selected automatically. In a browser,
-click **Connect to Controller Vibration** (in Sound → Grip motors) once and allow the prompt.
-
-The coloured dot next to the audio menu is **green** when vibration goes to the grip motors,
-**orange** when it's playing on ordinary speakers instead.
 
 ---
 
@@ -256,6 +145,31 @@ devices.
 
 ---
 
+## Quick start
+
+1. Plug the DualSense into the PC **with a USB cable** (full haptics need USB).
+2. Start the app (the standalone exe, or one of the batch files below).
+3. Click **Connect DualSense** (top right).
+4. On **Haptics & Triggers**, drop a sound file (WAV, MP3, OGG, FLAC) onto the page.
+5. Press **✕** on the controller to feel it in the grips.
+
+---
+
+## Connecting the controller
+
+| Connection | What works |
+|---|---|
+| **USB** (recommended) | Everything: buttons, sticks, motion, touchpad, lightbar, **adaptive triggers**, and **audio haptics** through the controller's 4-channel USB audio device. |
+| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. It uses the 8-bit, 3 kHz format worked out by community projects (Sony's own isn't public), so it can feel rougher and lag behind USB, and it only carries the Experiments tab's vibration. |
+
+On the desktop app the controller's audio device is selected automatically. In a browser,
+click **Connect to Controller Vibration** (in Sound → Grip motors) once and allow the prompt.
+
+The coloured dot next to the audio menu is **green** when vibration goes to the grip motors,
+**orange** when it's playing on ordinary speakers instead.
+
+---
+
 ## What you'll learn about the DualSense
 
 These are the details the app is built on. Several were measured on real hardware while
@@ -345,6 +259,92 @@ The bundled model is recognised automatically, with its parts found by position:
 > licensed [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/).
 
 Keep this credit if you redistribute the model.
+
+---
+
+## Running it
+
+### Desktop app from source
+
+Needs [Node.js](https://nodejs.org) (LTS).
+
+**Easiest:** double-click **`Run DualSense Haptic Designer.bat`**. It installs dependencies
+the first time, builds, and starts the app. Closing its window closes the app.
+
+Or from a terminal:
+
+```
+npm install      # once
+npm start        # build and run the desktop app
+npm run dev      # development mode with hot reload
+```
+
+**`Run Trigger Calibration.bat`** opens the app straight into the trigger calibration wizard
+(see [Trigger calibration](#trigger-calibration)).
+
+### Web server (run it in a browser)
+
+Needs Node.js, plus **Chrome or Edge** to use it.
+
+**Easiest:** double-click **`Run DualSense Haptic Designer (browser).bat`**. It builds the
+web version, starts a local server at **http://localhost:5174** and opens it in Chrome (or
+Edge). If the server is already running, it just opens another tab. Closing its window stops
+the server.
+
+Or from a terminal:
+
+```
+npm install          # once
+npm run web:build    # build the web version into out/web/
+npm run web:preview  # serve out/web/ at http://localhost:5174
+npm run web          # or: development server with hot reload, same address
+```
+
+`out/web/` is a plain static site, so you can also host it yourself. It must be served from
+`localhost` or over **https**, because browsers only allow controller (WebHID) and
+audio-output access on secure pages. See [the browser's limits](#running-in-a-browser-limits).
+
+---
+
+## Building the standalone exe
+
+The packaged app **doesn't need `node_modules`**. The interface (React, three.js and the
+app code) is compiled into a few bundled files, and the desktop shell only uses Electron and
+Node's built-ins. The exe contains just the Electron runtime, about 1.7 MB of app code and the
+3D model.
+
+You need Node.js and the project's dependencies **on the build machine only**:
+
+```
+npm install         # once
+npm run dist        # → dist/DualSense Haptic Designer 0.1.0.exe   (single portable file, ~78 MB)
+npm run dist:dir    # → dist/win-unpacked/DualSense Haptic Designer.exe   (folder, ~275 MB, starts instantly)
+```
+
+- Copy the single exe (or the whole `win-unpacked` folder) to any Windows PC and run it.
+- The first build downloads electron-builder's packaging tools; later builds reuse them.
+- Packaging settings live in the `build` section of `package.json`. Code signing and editing
+  the exe's resources are turned off (`signAndEditExecutable: false`). That avoids needing a
+  certificate, and avoids a Windows permissions error while unpacking the signing tools.
+- **Icon:** `assets/icon.ico` (16 to 256 px) is the app icon: the portable exe gets it from
+  `win.icon` in `package.json`, and it's also the window and taskbar icon and the web version's
+  favicon. Because the exe's resources aren't edited, the folder build's
+  `DualSense Haptic Designer.exe` still shows Electron's icon in Explorer.
+
+### Standalone exe (no install, no Node.js)
+
+Once you build the exe, you can run it portably without any subfolders or other files, or run it more quickly with the unpacked version. See [Building the standalone exe](#building-the-standalone-exe)
+to make one.
+
+- The exe isn't code-signed, so the first time Windows SmartScreen may say *"Windows
+  protected your PC"*. Click **More info → Run anyway**.
+- The single-file exe unpacks itself to a temporary folder on each launch, so it takes a few
+  seconds to start. The folder build (below) starts instantly.
+- It's portable: your settings (EQs, trigger effects, scenes, the composer project, the last
+  sound's location…) are saved in **`DualSense Haptic Designer.settings.json`** next to the exe.
+  Only a throwaway browser-engine cache goes to Windows' Temp folder. Move both files together
+  to take your setup along; delete the settings file to start fresh. The folder build and the desktop app from source keep their
+  settings in AppData as usual.
 
 ---
 
