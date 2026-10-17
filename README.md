@@ -47,22 +47,6 @@ It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a 
 
 ## Running it
 
-### Standalone exe (no install, no Node.js)
-
-Double-click **`DualSense Haptic Designer 0.1.0.exe`**. That's the whole app in one file;
-nothing else is needed on the PC. See [Building the standalone exe](#building-the-standalone-exe)
-to make one.
-
-- The exe isn't code-signed, so the first time Windows SmartScreen may say *"Windows
-  protected your PC"*. Click **More info → Run anyway**.
-- The single-file exe unpacks itself to a temporary folder on each launch, so it takes a few
-  seconds to start. The folder build (below) starts instantly.
-- It's portable: your settings (EQs, trigger effects, scenes, the composer project, the last
-  sound's location…) are saved in **`DualSense Haptic Designer.settings.json`** next to the exe.
-  Only a throwaway browser-engine cache goes to Windows' Temp folder. Move both files together
-  to take your setup along; delete the settings file to start fresh. The folder build and the desktop app from source keep their
-  settings in AppData as usual.
-
 ### Desktop app from source
 
 Needs [Node.js](https://nodejs.org) (LTS).
@@ -129,6 +113,21 @@ npm run dist:dir    # → dist/win-unpacked/DualSense Haptic Designer.exe   (fol
   `win.icon` in `package.json`, and it's also the window and taskbar icon and the web version's
   favicon. Because the exe's resources aren't edited, the folder build's
   `DualSense Haptic Designer.exe` still shows Electron's icon in Explorer.
+
+### Standalone exe (no install, no Node.js)
+
+Once you build the exe, you can run it portably without any subfolders or other files, or run it more quickly with the unpacked version. See [Building the standalone exe](#building-the-standalone-exe)
+to make one.
+
+- The exe isn't code-signed, so the first time Windows SmartScreen may say *"Windows
+  protected your PC"*. Click **More info → Run anyway**.
+- The single-file exe unpacks itself to a temporary folder on each launch, so it takes a few
+  seconds to start. The folder build (below) starts instantly.
+- It's portable: your settings (EQs, trigger effects, scenes, the composer project, the last
+  sound's location…) are saved in **`DualSense Haptic Designer.settings.json`** next to the exe.
+  Only a throwaway browser-engine cache goes to Windows' Temp folder. Move both files together
+  to take your setup along; delete the settings file to start fresh. The folder build and the desktop app from source keep their
+  settings in AppData as usual.
 
 ---
 
