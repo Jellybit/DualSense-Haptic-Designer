@@ -130,6 +130,8 @@ Toys that aren't part of the export workflow but show what the haptics can do:
   the clips, **Normalize** brings the mix's loudest point to full strength, and any face
   button plays it.
 
+<img width="1713" height="647" alt="image" src="https://github.com/user-attachments/assets/f9844c7b-f3cf-442f-856c-f21f9e881dd1" />
+
 ### The 3D view
 
 The controller model on the right follows the real controller's motion. Drag its left edge to
