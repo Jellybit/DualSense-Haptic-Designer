@@ -166,3 +166,64 @@ export function buildBtHaptics(samples: Uint8Array, counter: number): Uint8Array
   r[141] = (crc >>> 24) & 0xff
   return r.subarray(1)
 }
+
+// Report 0x39: what a PS5 sends while its speaker stream runs (Nielk1's console capture,
+// SAxense issue #1; layout as in DSZ, github.com/MaximumFreak/dsz). Carries two haptic
+// blocks per report, every 21.33 ms. DSZ found haptics felt smoother and less delayed in
+// these than in 0x32.
+//   [0]   0x39
+//   [1]   sequence counter (0-15) in the high nibble
+//   [2]   packet 0x11: 0x91, length 6, 7F 51 1F 62 28, then [9] frame counter (+2 per report)
+//   [10]  packet 0x15 (speaker audio): 0xD5 (= 0x80 sized | 0x40 doubled | 0x15), length 200,
+//         then two 200-byte Opus frames. We send silence: the speaker stays quiet.
+//   [412] packet 0x12 (haptics): 0xD2 (doubled), length 64, then two 64-byte blocks
+//   [542] zero
+//   [543..546] CRC-32 (seed 0xA2) over bytes [0..542], little-endian
+export const BT_HAPTICS_AUDIO_REPORT_ID = 0x39
+export const BT_HAPTICS_AUDIO_SIZE = 547
+const OPUS_FRAME = 200
+const OPUS_AT = 10
+const AUDIO_HAPTICS_AT = OPUS_AT + 2 + 2 * OPUS_FRAME
+
+/** One 10 ms Opus frame of digital silence, as libopus encodes it at the console's settings
+ *  (CELT only, fullband, stereo, 160 kbit/s CBR: TOC 0xF4, then the silence flag). */
+const SILENT_OPUS = new Uint8Array(OPUS_FRAME)
+SILENT_OPUS.set([0xf4, 0xff, 0xfe])
+
+/** Build a report 0x39 payload (without report ID, 546 bytes). `samples` = 128 interleaved
+ *  signed 8-bit bytes (two blocks of 32 stereo frames). `counter` advances by 2 per report. */
+export function buildBtHapticsAudio(samples: Uint8Array, seq: number, counter: number): Uint8Array<ArrayBuffer> {
+  const r = new Uint8Array(BT_HAPTICS_AUDIO_SIZE)
+  r[0] = BT_HAPTICS_AUDIO_REPORT_ID
+  r[1] = (seq & 0x0f) << 4
+  r.set([0x91, 6, 0x7f, 0x51, 0x1f, 0x62, 0x28, counter & 0xff], 2)
+  r[OPUS_AT] = 0xd5
+  r[OPUS_AT + 1] = OPUS_FRAME
+  r.set(SILENT_OPUS, OPUS_AT + 2)
+  r.set(SILENT_OPUS, OPUS_AT + 2 + OPUS_FRAME)
+  r[AUDIO_HAPTICS_AT] = 0xd2
+  r[AUDIO_HAPTICS_AT + 1] = 64
+  r.set(samples.subarray(0, 128), AUDIO_HAPTICS_AT + 2)
+  const n = BT_HAPTICS_AUDIO_SIZE - 4
+  const crc = crc32Seeded(0xa2, r, 0, n)
+  r[n] = crc & 0xff
+  r[n + 1] = (crc >>> 8) & 0xff
+  r[n + 2] = (crc >>> 16) & 0xff
+  r[n + 3] = (crc >>> 24) & 0xff
+  return r.subarray(1)
+}
+
+/** Report 0x32 holding only the config packet `91 01 02`: stops the microphone stream the
+ *  controller starts sending once 0x39 reports arrive, and keeps input reports on (DSZ). */
+export function buildBtMicOff(seq: number): Uint8Array<ArrayBuffer> {
+  const r = new Uint8Array(BT_HAPTICS_SIZE)
+  r[0] = BT_HAPTICS_REPORT_ID
+  r[1] = (seq & 0x0f) << 4
+  r.set([0x91, 1, 0x02], 2)
+  const crc = crc32Seeded(0xa2, r, 0, BT_HAPTICS_SIZE - 4)
+  r[138] = crc & 0xff
+  r[139] = (crc >>> 8) & 0xff
+  r[140] = (crc >>> 16) & 0xff
+  r[141] = (crc >>> 24) & 0xff
+  return r.subarray(1)
+}

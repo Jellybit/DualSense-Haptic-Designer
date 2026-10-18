@@ -192,6 +192,11 @@ export function parseInputReport(
     return out
   }
   if (reportId === 0x31 && data.byteLength >= 54) {
+    // Low nibble of data[0] is the packet type: 1 = controller state (0 on some firmware).
+    // While Bluetooth haptics run in report 0x39 the controller also sends microphone audio
+    // as 0x31 reports of another type (31 x2 ...); read as state, it's phantom button presses.
+    const kind = data.getUint8(0) & 0x0f
+    if (kind > 1) return null
     parseFull(data, 1, out, cal)
     return out
   }

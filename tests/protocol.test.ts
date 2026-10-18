@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { crc32, crc32Seeded, crc32Update } from '../src/renderer/src/device/crc32'
 import { decodeTrigger, effectProfile, encodeTrigger, slopeStrengths } from '../src/renderer/src/device/triggerEffects'
-import { buildBtHaptics, buildBtOutput, buildCommon, buildUsbOutput } from '../src/renderer/src/device/outputReport'
+import { buildBtHaptics, buildBtHapticsAudio, buildBtMicOff, buildBtOutput, buildCommon, buildUsbOutput } from '../src/renderer/src/device/outputReport'
 import { emptyInputState, parseCalibration, parseInputReport } from '../src/renderer/src/device/inputReport'
 import { makePreset, parsePresets, serializePresets } from '../src/renderer/src/export/presets'
 
@@ -122,6 +122,30 @@ describe('output reports', () => {
     const crc = (crc32Update(~0xeada2d49 >>> 0, full, 0, 138) ^ 0xffffffff) >>> 0
     expect((full[138] | (full[139] << 8) | (full[140] << 16) | (full[141] << 24)) >>> 0).toBe(crc)
   })
+
+  it('BT haptics+audio report 0x39 matches the DSZ / PS5 capture layout', () => {
+    const samples = new Uint8Array(128).map((_, i) => i + 1)
+    const full = [0x39, ...buildBtHapticsAudio(samples, 3, 6)]
+    expect(full.length).toBe(547)
+    expect(full.slice(0, 12)).toEqual([0x39, 0x30, 0x91, 6, 0x7f, 0x51, 0x1f, 0x62, 0x28, 6, 0xd5, 0xc8])
+    // two silent Opus frames (TOC 0xF4 = CELT, fullband, 10 ms, stereo)
+    expect(full.slice(12, 15)).toEqual([0xf4, 0xff, 0xfe])
+    expect(full.slice(212, 215)).toEqual([0xf4, 0xff, 0xfe])
+    expect(full.slice(412, 414)).toEqual([0xd2, 0x40])
+    expect(full.slice(414, 542)).toEqual([...samples])
+    expect(full[542]).toBe(0)
+    const crc = crc32Seeded(0xa2, full, 0, 543)
+    expect((full[543] | (full[544] << 8) | (full[545] << 16) | (full[546] << 24)) >>> 0).toBe(crc >>> 0)
+  })
+
+  it('BT mic-off is report 0x32 holding only 91 01 02', () => {
+    const full = [0x32, ...buildBtMicOff(1)]
+    expect(full.length).toBe(142)
+    expect(full.slice(0, 5)).toEqual([0x32, 0x10, 0x91, 1, 2])
+    expect(full.slice(5, 138).every((b) => b === 0)).toBe(true)
+    const crc = crc32Seeded(0xa2, full, 0, 138)
+    expect((full[138] | (full[139] << 8) | (full[140] << 16) | (full[141] << 24)) >>> 0).toBe(crc >>> 0)
+  })
 })
 
 describe('input report', () => {
@@ -174,6 +198,20 @@ describe('input report', () => {
     const s = parseInputReport(0x31, new DataView(bt.buffer), emptyInputState())!
     expect(s.buttons.cross).toBe(true)
     expect(s.touch[0].x).toBe(1000)
+  })
+
+  it('ignores BT microphone packets (sent while report 0x39 haptics run)', () => {
+    // captured by DSZ on a DualSense Edge: 31 12 00 D4 ... (type nibble 2, not 1)
+    const hex =
+      '12 00 D4 7E CE 2B EF 0E 45 AC 7B AB 01 FF DA C3 0D 66 CE 3A 3C 87 D9 95 68 7F 1F ED 42 0F B5 3B EF 67 03 CE 5E D3 8C 25 E0 C4 6F 63 3B DC C4 7C C2 F5 C1 56 7D C4 F8 AE AB A0 96 89 5B 68 94 2A DD 21 B0 13 5F 8C 3C 80 24 47 A5 39 73'
+    const mic = new Uint8Array(hex.split(' ').map((h) => parseInt(h, 16)))
+    expect(mic.length).toBe(77)
+    expect(parseInputReport(0x31, new DataView(mic.buffer), emptyInputState())).toBeNull()
+    // a real state report (type 1) still parses
+    const bt = new Uint8Array(77)
+    bt.set(usbReport(), 1)
+    bt[0] = 0x01
+    expect(parseInputReport(0x31, new DataView(bt.buffer), emptyInputState())).not.toBeNull()
   })
 
   it('decodes d-pad hat', () => {

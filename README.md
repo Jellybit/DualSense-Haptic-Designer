@@ -150,8 +150,9 @@ Live readout of every input, IMU axis setup, lightbar and player LEDs, haptics t
 **Delay Vibration** countdown so you have time to pick the controller up), and loading and
 mapping a 3D model.
 
-**Recenter** the 3D view with the on-screen button or **Options, Create, L3 or R3** on the
-controller. The model then faces the camera squarely and follows your movements from there.
+**Recenter 3D** (or **L3** on the controller) makes the model face the camera squarely and
+follow your movements from there. If "down" feels off, hold the controller still and press
+**Recenter Sensors** (or **R3**). **Options** does both.
 (The PS button is left alone because Steam often uses it.)
 
 **Reset All** (top bar) and the **Reset … Settings** buttons in each section put settings back
@@ -175,7 +176,7 @@ devices.
 | Connection | What works |
 |---|---|
 | **USB** (recommended) | Everything: buttons, sticks, motion, touchpad, lightbar, **adaptive triggers**, and **audio haptics** through the controller's 4-channel USB audio device. |
-| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. It uses the 8-bit, 3 kHz format worked out by community projects (Sony's own isn't public), so it can feel rougher and lag behind USB, and it only carries the Experiments tab's vibration. |
+| **Bluetooth** | Input, motion, triggers and lightbar. There's no audio device over Bluetooth; an **experimental** BT haptics stream (HID report `0x32`) can be switched on with **BT haptics** in the top bar. It uses the 8-bit, 3 kHz format worked out by community projects (Sony's own isn't public), so it can feel rougher and lag behind USB, and it only carries the Experiments tab's vibration. A riskier `0x39` option tries to match what seems to be Sony's official protocol, worked out by sniffing the Bluetooth packets a real PS5 sends to its controller. It makes the controller stream its microphone back, and on a weak connection it can drop the controller and cause phantom button presses in other programs like Steam. |
 
 On the desktop app the controller's audio device is selected automatically. In a browser,
 click **Connect to Controller Vibration** (in Sound → Grip motors) once and allow the prompt.
@@ -400,3 +401,4 @@ Electron + TypeScript + React + three.js, built with electron-vite (desktop) and
 - Nielk1's DualSense trigger effect generator: trigger mode encodings
 - [SAxense](https://github.com/egormanga/SAxense): Bluetooth haptics report `0x32`
 - [DS5Dongle](https://github.com/awalol/DS5Dongle): Bluetooth haptics sample format (signed 8-bit) and sequence counter
+- [DSZ](https://github.com/MaximumFreak/dsz): Bluetooth haptics report `0x39` (from Nielk1's capture of a PS5's Bluetooth packets), filtering, and telling microphone packets apart from input

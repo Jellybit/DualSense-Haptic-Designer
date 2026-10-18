@@ -24,3 +24,47 @@ describe('recenter', () => {
     close(t.quaternion, axisAngle(1, 0, 0, 30))
   })
 })
+
+describe('recenter sensors', () => {
+  // feed still readings (accel in g, gyro in deg/s) so the smoothed values settle
+  const feed = (t: OrientationTracker, accel: [number, number, number], gyro: [number, number, number] = [0, 0, 0]) => {
+    let ts = 1
+    for (let i = 0; i < 100; i++) {
+      // 4 ms apart (the sensor clock ticks at 3 MHz)
+      const s = { full: true, sensorTimestamp: (ts += 12000), accel, gyro } as never
+      t.update(s)
+    }
+  }
+
+  it('snaps down to the accelerometer and keeps heading', () => {
+    const t = new OrientationTracker()
+    t.filter.beta = 0 // stop the filter correcting by itself, to see the snap alone
+    const heading = axisAngle(0, 1, 0, 50)
+    t.filter.q = quatMul(heading, axisAngle(1, 0, 0, 35)) // wrongly believes it's tilted 35°
+    feed(t, [0, 1, 0]) // actually lying flat
+    t.filter.q = quatMul(heading, axisAngle(1, 0, 0, 35))
+    expect(t.recenterSensors()).toBe(true)
+    const d = t.gravityInController
+    expect(d[0]).toBeCloseTo(0, 5)
+    expect(d[1]).toBeCloseTo(-1, 5)
+    expect(d[2]).toBeCloseTo(0, 5)
+    close(t.filter.q, heading)
+  })
+
+  it('handles being upside down', () => {
+    const t = new OrientationTracker()
+    t.filter.beta = 0
+    feed(t, [0, -1, 0])
+    t.filter.q = [1, 0, 0, 0]
+    expect(t.recenterSensors()).toBe(true)
+    expect(t.gravityInController[1]).toBeCloseTo(1, 5)
+  })
+
+  it('refuses while the controller is moving', () => {
+    const t = new OrientationTracker()
+    feed(t, [0, 1.6, 0])
+    const before = [...t.filter.q]
+    expect(t.recenterSensors()).toBe(false)
+    expect(t.filter.q).toEqual(before)
+  })
+})

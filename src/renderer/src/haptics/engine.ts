@@ -6,7 +6,7 @@
 // Monitor: if a 2-channel device is selected (speakers/headphones) the haptic signal is
 //      sent to channels 1-2 so you can *hear* the design.
 // BT:  (experimental) the synth output is tapped, decimated to 3 kHz and streamed in
-//      HID report 0x32 — see btHaptics.ts.
+//      HID report 0x39 or 0x32 — see btHaptics.ts.
 
 import workletUrl from './synth.worklet.ts?worker&url'
 import type { MixerMessage } from './mixer'

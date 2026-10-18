@@ -8,8 +8,11 @@ import {
   type InputState,
 } from './inputReport'
 import {
+  BT_HAPTICS_AUDIO_REPORT_ID,
   BT_HAPTICS_REPORT_ID,
   buildBtHaptics,
+  buildBtHapticsAudio,
+  buildBtMicOff,
   buildBtOutput,
   buildUsbOutput,
   COMMON_SIZE,
@@ -210,6 +213,18 @@ export class DualSense {
   async sendBtHaptics(samples: Uint8Array, counter: number): Promise<void> {
     if (!this.device || this.info?.transport !== 'bt') return
     await this.device.sendReport(BT_HAPTICS_REPORT_ID, buildBtHaptics(samples, counter))
+  }
+
+  /** Report 0x39: two haptic blocks (128 bytes) plus silent speaker audio. */
+  async sendBtHapticsAudio(samples: Uint8Array, seq: number, counter: number): Promise<void> {
+    if (!this.device || this.info?.transport !== 'bt') return
+    await this.device.sendReport(BT_HAPTICS_AUDIO_REPORT_ID, buildBtHapticsAudio(samples, seq, counter))
+  }
+
+  /** Stop the microphone stream that 0x39 reports start. */
+  async sendBtMicOff(seq: number): Promise<void> {
+    if (!this.device || this.info?.transport !== 'bt') return
+    await this.device.sendReport(BT_HAPTICS_REPORT_ID, buildBtMicOff(seq))
   }
 }
 

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { dualSense } from './device/hid'
 import { hapticEngine, HapticEngine, type OutputDevice } from './haptics/engine'
-import { btHaptics } from './haptics/btHaptics'
-import { lightbar, loadLocal, recenter, saveLocal, useConnection, useTicker } from './store'
+import { btHaptics, type BtPacketMode } from './haptics/btHaptics'
+import { lightbar, loadLocal, recenter, recenterSensors, saveLocal, useConnection, useTicker } from './store'
 import { ButtonHint } from './ui/ButtonHint'
 import { ControllerView, loadModelFromBytes, placeholderModel, type LoadedModel } from './viewer/ControllerView'
 import { autoMap, defaultRig, knownRigFor, migrateRig, rigFitsModel, type RigMap } from './viewer/rig'
@@ -216,17 +216,53 @@ For designing grip vibration, connect the controller by USB.
 
 Turn on Bluetooth vibration anyway?`
 
+const BT_0X39_WARNING = `0x39 is the report a PS5 uses. It may feel smoother, but it's risky:
+
+It makes the controller stream its microphone back over Bluetooth. On a weak connection that can drop the controller, and programs like Steam may read the microphone data as button presses (on-screen keyboard popping up, windows minimizing, tabs switching, Steam opening).
+
+Use 0x39 anyway?`
+
 /** Live numbers for the experimental Bluetooth haptics stream: is it keeping up? */
 function BtHapticsReadout() {
   useTicker(4)
   const s = btHaptics.stats
   return (
-    <span
-      className="muted small mono"
-      title="Packets sent per second (should be ~94) · how long each send takes · gaps (the stream ran dry) · drops (Bluetooth fell behind)"
-    >
-      {s.sentPerSec}/s · {s.sendMs.toFixed(1)} ms · gaps {s.gaps} · drops {s.dropped}
-    </span>
+    <>
+      <select
+        value={s.mode}
+        onChange={(e) => {
+          const m = e.target.value as BtPacketMode
+          if (m === '0x39' && !window.confirm(BT_0X39_WARNING)) return
+          btHaptics.mode = m
+        }}
+        title="Report type. 0x32 is haptics only (1 block every 11 ms). 0x39 is what a PS5 sends (2 blocks every 21 ms, with silent speaker audio), but it can drop the controller and cause phantom button presses in Steam"
+      >
+        <option value="0x32">0x32</option>
+        <option value="0x39">0x39 (risky)</option>
+      </select>
+      <label
+        className="muted small"
+        title="Low-pass before the 3 kHz conversion. Lower is smoother; higher keeps more detail but can buzz"
+      >
+        LP{' '}
+        <input
+          type="range"
+          min={200}
+          max={1400}
+          step={50}
+          value={btHaptics.lowpass}
+          onChange={(e) => (btHaptics.lowpass = +e.target.value)}
+          style={{ width: 70, verticalAlign: 'middle' }}
+        />{' '}
+        <span className="mono">{btHaptics.lowpass} Hz</span>
+      </label>
+      <span
+        className="muted small mono"
+        title={`Packets sent per second (should be ~${s.mode === '0x39' ? 47 : 94}, or 0 while idle) · how long each send takes · gaps (the stream ran dry) · drops (Bluetooth fell behind)`}
+      >
+        {s.idle ? 'idle' : `${s.sentPerSec}/s`} · {s.sendMs.toFixed(1)} ms · gaps {s.gaps} · drops {s.dropped}
+      </span>
+    </>
   )
 }
 
@@ -237,8 +273,11 @@ function SideInfo() {
   return (
     <div className="side-info">
       <div className="row">
-        <button onClick={() => recenter('Recenter')} disabled={!info} title="Hold the controller pointing at the screen, then click (or press Options, Create, L3 or R3 on the controller)">
-          Recenter
+        <button onClick={() => recenter('Recenter 3D')} disabled={!info} title="Hold the controller pointing at the screen, then click: the model turns to face the camera (L3 on the controller; Options does both recenters)">
+          Recenter 3D
+        </button>
+        <button onClick={() => recenterSensors('Recenter Sensors')} disabled={!info} title="Hold the controller still, then click: re-finds which way is down from the accelerometer, for the scenes and the model's tilt (R3 on the controller; Options does both recenters)">
+          Recenter Sensors
         </button>
         <span className="muted small">
           {info ? `${dualSense.reportRate} Hz · battery ${s.battery}%${s.charging ? ' ⚡' : ''}` : 'The model follows the controller once connected'}
@@ -341,7 +380,7 @@ function AudioControls() {
       {info?.transport === 'bt' && (
         <button
           className={btHaptics.active ? 'active' : ''}
-          title="Experimental: stream haptics over Bluetooth (report 0x32)"
+          title="Experimental: stream haptics over Bluetooth (report 0x39 or 0x32)"
           onClick={() => {
             if (btHaptics.active) btHaptics.stop()
             else if (window.confirm(BT_HAPTICS_WARNING)) btHaptics.start(hapticEngine, dualSense)

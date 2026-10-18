@@ -5,7 +5,7 @@ import { dualSense } from '../device/hid'
 import { BUTTON_NAMES } from '../device/inputReport'
 import { hapticEngine } from '../haptics/engine'
 import { impactGrain } from '../haptics/dsp'
-import { lightbar, loadLocal, recenter, saveLocal, tracker, useConnection, useTicker } from '../store'
+import { lightbar, loadLocal, recenter, recenterSensors, saveLocal, tracker, useConnection, useTicker } from '../store'
 import { DEFAULT_AXIS_MAP, type AxisSel } from '../orientation/tracker'
 import { Card, Param } from '../ui/controls'
 import type { LoadedModel } from '../viewer/ControllerView'
@@ -105,13 +105,14 @@ function ImuCard() {
       title="Motion (IMU)"
       right={
         <>
-          <button onClick={() => recenter('Recenter')}>Recenter</button>
+          <button onClick={() => recenter('Recenter 3D')}>Recenter 3D</button>
+          <button onClick={() => recenterSensors('Recenter Sensors')}>Recenter Sensors</button>
           <button onClick={() => tracker.reset()}>Reset</button>
         </>
       }
     >
       <p className="muted small" style={{ marginTop: 0 }}>
-        Orientation is fused from gyro + accelerometer (Madgwick). Yaw slowly drifts — press <b>Recenter</b> (or Options, Create, L3 or R3 on the controller) while pointing the controller at the screen. If the
+        Orientation is fused from gyro + accelerometer (Madgwick). Yaw slowly drifts — press <b>Recenter 3D</b> (L3 on the controller) while pointing the controller at the screen. If down is off, hold the controller still and press <b>Recenter Sensors</b> (R3). Options does both. If the
         model tilts the wrong way, flip the axis mapping below.
       </p>
       <div className="row">

@@ -119,6 +119,18 @@ export class Biquad {
     this.a2 = (1 - alpha) / a0
   }
 
+  setHighpass(freq: number, q = 0.707, sr = SAMPLE_RATE) {
+    const w = (2 * Math.PI * Math.max(10, Math.min(freq, sr * 0.45))) / sr
+    const alpha = Math.sin(w) / (2 * q)
+    const cw = Math.cos(w)
+    const a0 = 1 + alpha
+    this.b0 = (1 + cw) / 2 / a0
+    this.b1 = -(1 + cw) / a0
+    this.b2 = this.b0
+    this.a1 = (-2 * cw) / a0
+    this.a2 = (1 - alpha) / a0
+  }
+
   process(x: number) {
     const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2
     this.x2 = this.x1
