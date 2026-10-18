@@ -15,7 +15,7 @@ Along the way it shows the raw bytes and channel layouts involved, so it doubles
 hands-on reference for the DualSense's haptics, triggers and inputs.
 
 It runs **as a desktop app** (Windows, including a standalone `.exe`) **or in a browser**
-(Chrome or Edge).
+(Chrome or Edge). You can try the browser version [here](https://jellybit.com/dualsense/).
 
 AI assistance was used when developing this app. It still took several days and a ton of design 
 decisions for usability and usefulness, by a career game designer for almost 20 years.
