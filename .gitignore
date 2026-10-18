@@ -8,3 +8,6 @@ dist/
 
 # icon source art (only the finished assets/icon.ico is kept in the repo)
 /icon/
+
+# local helper: launches straight into the trigger wall test
+/Run Trigger Calibration.bat

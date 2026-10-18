@@ -300,9 +300,6 @@ npm start        # build and run the desktop app
 npm run dev      # development mode with hot reload
 ```
 
-**`Run Trigger Calibration.bat`** opens the app straight into the trigger calibration wizard
-(see [Trigger calibration](#trigger-calibration)).
-
 ### Web server (run it in a browser)
 
 Needs Node.js, plus **Chrome or Edge** to use it.

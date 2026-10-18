@@ -75,7 +75,7 @@ function createWindow() {
     }
   })
 
-  // DSHD_START=calibrate opens straight into the trigger calibration (see the .bat files)
+  // DSHD_START=calibrate opens straight into the trigger calibration (set by a local launcher script)
   const hash = process.env['DSHD_START'] ?? ''
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'] + (hash ? '#' + hash : ''))
